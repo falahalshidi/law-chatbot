@@ -21,14 +21,14 @@ export async function sendMessage(
     // Determine which endpoint to use
     const useOpenAI = USE_OPENAI_DIRECT && OPENAI_API_KEY;
 
-    // Use Vite proxy in development to avoid CORS issues
+    // Use Vite proxy in development, Netlify Function in production
     // Check if we're in development mode (Vite sets this)
     const isDevelopment = typeof window !== 'undefined' && window.location.hostname === 'localhost';
     const endpoint = useOpenAI
       ? "https://api.openai.com/v1/chat/completions"
       : isDevelopment
         ? "/api/pinecone"  // Use Vite proxy in development
-        : PINECONE_CHAT_ENDPOINT;  // Direct endpoint in production
+        : "/.netlify/functions/chat";  // Use Netlify Function in production
 
     console.log("Sending request to:", endpoint);
     console.log("Request payload:", { model: "gpt-4o", messages: messages.length });

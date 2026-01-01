@@ -1,0 +1,86 @@
+import type { Handler, HandlerEvent, HandlerContext } from "@netlify/functions";
+
+const PINECONE_API_KEY = process.env.PINECONE_API_KEY || "";
+const PINECONE_CHAT_ENDPOINT = "https://prod-1-data.ke.pinecone.io/assistant/chat/lawchatbot";
+
+const handler: Handler = async (event: HandlerEvent, context: HandlerContext) => {
+    // Handle CORS preflight
+    if (event.httpMethod === "OPTIONS") {
+        return {
+            statusCode: 200,
+            headers: {
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Headers": "Content-Type",
+                "Access-Control-Allow-Methods": "POST, OPTIONS",
+            },
+            body: "",
+        };
+    }
+
+    if (event.httpMethod !== "POST") {
+        return {
+            statusCode: 405,
+            body: JSON.stringify({ error: "Method not allowed" }),
+        };
+    }
+
+    try {
+        const body = JSON.parse(event.body || "{}");
+
+        console.log("Sending request to Pinecone:", PINECONE_CHAT_ENDPOINT);
+
+        const response = await fetch(PINECONE_CHAT_ENDPOINT, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "Api-Key": PINECONE_API_KEY,
+                "Authorization": `Bearer ${PINECONE_API_KEY}`,
+                "Accept": "application/json, text/event-stream",
+            },
+            body: JSON.stringify({
+                messages: body.messages,
+                stream: false,
+            }),
+        });
+
+        console.log("Pinecone response status:", response.status);
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error("Pinecone error:", errorText);
+            return {
+                statusCode: response.status,
+                headers: {
+                    "Access-Control-Allow-Origin": "*",
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify({ error: errorText }),
+            };
+        }
+
+        const data = await response.json();
+
+        return {
+            statusCode: 200,
+            headers: {
+                "Access-Control-Allow-Origin": "*",
+                "Content-Type": "application/json",
+            },
+            body: JSON.stringify(data),
+        };
+    } catch (error) {
+        console.error("Function error:", error);
+        return {
+            statusCode: 500,
+            headers: {
+                "Access-Control-Allow-Origin": "*",
+                "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+                error: error instanceof Error ? error.message : "Internal server error"
+            }),
+        };
+    }
+};
+
+export { handler };
