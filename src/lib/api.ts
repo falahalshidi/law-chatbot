@@ -1,5 +1,5 @@
 import type { Message } from "@/components/chat-interface";
-import { PINECONE_API_KEY, PINECONE_CHAT_ENDPOINT, OPENAI_API_KEY, USE_OPENAI_DIRECT } from "./env";
+import { PINECONE_API_KEY, OPENAI_API_KEY, USE_OPENAI_DIRECT } from "./env";
 
 export async function sendMessage(
   userMessage: string,
