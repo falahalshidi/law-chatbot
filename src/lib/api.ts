@@ -47,8 +47,8 @@ export async function sendMessage(
 
       if (!isDevelopment) {
         // Only add these headers if not using proxy (proxy adds them automatically)
+        // Pinecone Assistant API only requires Api-Key header, not Authorization
         headers["Api-Key"] = PINECONE_API_KEY;
-        headers["Authorization"] = `Bearer ${PINECONE_API_KEY}`;
       }
     }
 
