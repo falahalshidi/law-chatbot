@@ -1,4 +1,4 @@
-import type { Message } from "@/components/chat-interface";
+import type { Message } from "@/types/chat";
 import { PINECONE_API_KEY, OPENAI_API_KEY, USE_OPENAI_DIRECT } from "./env";
 
 export async function sendMessage(

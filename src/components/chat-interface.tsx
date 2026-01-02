@@ -2,13 +2,10 @@ import * as React from "react";
 import { PromptBox } from "@/components/ui/chatgpt-prompt-input";
 import { ChatMessage } from "./chat-message";
 import { sendMessage } from "@/lib/api";
+import LegalChatbotPage from "./legal-chatbot-page";
+import type { Message } from "@/types/chat";
 
-export interface Message {
-  id: string;
-  role: "user" | "assistant";
-  content: string;
-  timestamp: Date;
-}
+export type { Message };
 
 export function ChatInterface() {
   const [messages, setMessages] = React.useState<Message[]>([]);
@@ -87,73 +84,7 @@ export function ChatInterface() {
     }
   };
 
-  return (
-    <div className="flex h-screen w-full flex-col bg-background dark:bg-[#212121]">
-      {/* Header */}
-      <div className="border-b border-border bg-card dark:bg-[#2a2a2a] px-4 py-3">
-        <h1 className="text-center text-2xl font-semibold text-foreground">
-          مساعد القانون
-        </h1>
-      </div>
-
-      {/* Messages Container */}
-      <div className="flex-1 overflow-y-auto px-4 py-6">
-        <div className="mx-auto max-w-3xl">
-          {messages.length === 0 ? (
-            <div className="flex h-full items-center justify-center">
-              <div className="text-center">
-                <p className="text-xl text-muted-foreground dark:text-gray-400">
-                  مرحباً! كيف يمكنني مساعدتك اليوم؟
-                </p>
-                <p className="mt-2 text-sm text-muted-foreground dark:text-gray-500">
-                  اكتب سؤالك واضغط Enter للإرسال
-                </p>
-              </div>
-            </div>
-          ) : (
-            <>
-              {messages.map((message) => (
-                <ChatMessage
-                  key={message.id}
-                  role={message.role}
-                  content={message.content}
-                  timestamp={message.timestamp}
-                />
-              ))}
-              {isLoading && (
-                <div className="flex justify-start mb-4">
-                  <div className="flex max-w-[80%] flex-col gap-1 items-start">
-                    <div className="rounded-2xl bg-muted px-4 py-3 dark:bg-[#3a3a3a]">
-                      <div className="flex gap-1">
-                        <div className="h-2 w-2 animate-bounce rounded-full bg-foreground [animation-delay:-0.3s]"></div>
-                        <div className="h-2 w-2 animate-bounce rounded-full bg-foreground [animation-delay:-0.15s]"></div>
-                        <div className="h-2 w-2 animate-bounce rounded-full bg-foreground"></div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
-              <div ref={messagesEndRef} />
-            </>
-          )}
-        </div>
-      </div>
-
-      {/* Input Container */}
-      <div className="border-t border-border bg-card dark:bg-[#2a2a2a] p-4">
-        <div className="mx-auto max-w-3xl">
-          <form ref={formRef} onSubmit={handleSubmit}>
-            <PromptBox
-              name="message"
-              value={inputValue}
-              onChange={(e) => setInputValue(e.target.value)}
-              onKeyDown={handleKeyDown}
-              disabled={isLoading}
-            />
-          </form>
-        </div>
-      </div>
-    </div>
-  );
+  // Use the new LegalChatbotPage design
+  return <LegalChatbotPage />;
 }
 
