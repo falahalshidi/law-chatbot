@@ -1,7 +1,7 @@
 const PINECONE_API_KEY = process.env.PINECONE_API_KEY || process.env.VITE_PINECONE_API_KEY || "";
 const PINECONE_CHAT_ENDPOINT = "https://prod-1-data.ke.pinecone.io/assistant/chat/lawchatbot";
 
-exports.handler = async (event, context) => {
+export const handler = async (event, context) => {
     // Handle CORS preflight
     if (event.httpMethod === "OPTIONS") {
         return {
