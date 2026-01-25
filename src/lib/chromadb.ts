@@ -16,9 +16,11 @@ const COLLECTION_NAME = "law_documents";
  */
 export async function getCollection() {
   try {
+    // Type assertion needed because CloudClient's getCollection may not require embeddingFunction
+    // when the collection already exists and was created with embeddings
     const collection = await chromaClient.getCollection({
       name: COLLECTION_NAME,
-    });
+    } as any);
     return collection;
   } catch (error) {
     // Collection doesn't exist, create it

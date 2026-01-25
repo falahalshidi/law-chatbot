@@ -155,7 +155,7 @@ export default function AdminPage() {
       });
 
       if (response.ok) {
-        const data = await response.json();
+        await response.json(); // Response consumed but data not needed
         setUploadStatus({ ...uploadStatus, [filename]: "success" });
         await loadFiles();
         setTimeout(() => {
@@ -281,7 +281,7 @@ export default function AdminPage() {
         });
 
         if (response.ok) {
-          const data = await response.json();
+          await response.json(); // Response consumed but data not needed
           setUploadStatus({ ...uploadStatus, [filename]: "success" });
           await loadFiles();
           setTimeout(() => {
