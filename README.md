@@ -24,15 +24,37 @@ The `/components/ui` directory is the standard location for shadcn/ui components
 npm install
 ```
 
-2. Start the development server:
+2. Create `.env` file:
 ```bash
+# Copy the example file
+cp env.example .env
+
+# Or create it manually with the following content:
+# See ENV_SETUP.md for detailed instructions
+```
+
+3. Start the development server:
+```bash
+# For local development with Netlify Functions
+netlify dev
+
+# Or for frontend only
 npm run dev
 ```
 
-3. Build for production:
+4. Build for production:
 ```bash
 npm run build
 ```
+
+## Environment Variables
+
+This project uses environment variables for configuration. See `ENV_SETUP.md` for detailed instructions.
+
+**Quick setup:**
+1. Copy `env.example` to `.env`
+2. Update the values with your actual credentials
+3. For Netlify deployment, also set these in Netlify Dashboard → Settings → Environment Variables
 
 ## Dependencies
 

@@ -1,14 +1,26 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { useNavigate } from "react-router-dom";
 import { supabase, type User } from "@/lib/supabase";
+import { Upload, FileText, X, Trash2 } from "lucide-react";
+
+interface UploadedFile {
+  filename: string;
+  fileType: string;
+  uploadedAt: string;
+  chunkCount: number;
+}
 
 export default function AdminPage() {
   const navigate = useNavigate();
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [files, setFiles] = useState<UploadedFile[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const [uploadStatus, setUploadStatus] = useState<{ [key: string]: "uploading" | "success" | "error" }>({});
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     // Check if user is logged in and is admin
@@ -26,6 +38,7 @@ export default function AdminPage() {
     }
 
     loadUsers();
+    loadFiles();
   }, [navigate]);
 
   const loadUsers = async () => {
@@ -92,6 +105,226 @@ export default function AdminPage() {
     navigate("/");
   };
 
+  const loadFiles = async () => {
+    try {
+      const endpoint = "/api/upload-file";
+
+      const response = await fetch(endpoint, {
+        method: "GET",
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setFiles(data.files || []);
+      }
+    } catch (err) {
+      console.error("Error loading files:", err);
+    }
+  };
+
+  const handleFileSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const selectedFile = event.target.files?.[0];
+    if (!selectedFile) return;
+
+    const filename = selectedFile.name;
+    setUploadStatus({ ...uploadStatus, [filename]: "uploading" });
+    setUploading(true);
+
+    try {
+      // Convert file to base64
+      const fileBuffer = await selectedFile.arrayBuffer();
+      const base64 = btoa(
+        new Uint8Array(fileBuffer).reduce(
+          (data, byte) => data + String.fromCharCode(byte),
+          ""
+        )
+      );
+
+      const endpoint = "/api/upload-file";
+
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          file: base64,
+          filename: filename,
+          fileType: selectedFile.type,
+        }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setUploadStatus({ ...uploadStatus, [filename]: "success" });
+        await loadFiles();
+        setTimeout(() => {
+          setUploadStatus((prev) => {
+            const newStatus = { ...prev };
+            delete newStatus[filename];
+            return newStatus;
+          });
+        }, 3000);
+      } else {
+        let errorMessage = "فشل رفع الملف";
+        try {
+          // Read response body once
+          const contentType = response.headers.get("content-type");
+          let errorData: any;
+          
+          if (contentType?.includes("application/json")) {
+            errorData = await response.json();
+            errorMessage = errorData.error || errorData.message || errorMessage;
+            if (errorData.details) {
+              console.error("Error details:", errorData.details);
+            }
+          } else {
+            const errorText = await response.text();
+            errorMessage = errorText || errorMessage;
+          }
+        } catch (parseError) {
+          errorMessage = `خطأ ${response.status}: ${response.statusText}`;
+          console.error("Error parsing response:", parseError);
+        }
+        setUploadStatus({ ...uploadStatus, [filename]: "error" });
+        setError(errorMessage);
+      }
+    } catch (err) {
+      setUploadStatus({ ...uploadStatus, [filename]: "error" });
+      const errorMessage = err instanceof Error ? err.message : "حدث خطأ أثناء رفع الملف";
+      setError(`خطأ في الاتصال: ${errorMessage}`);
+      console.error("Upload error:", err);
+    } finally {
+      setUploading(false);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
+    }
+  };
+
+  const handleDeleteFile = async (filename: string) => {
+    if (!confirm(`هل أنت متأكد من حذف الملف "${filename}"؟`)) {
+      return;
+    }
+
+    try {
+      const endpoint = "/api/upload-file";
+
+      const response = await fetch(endpoint, {
+        method: "DELETE",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ filename }),
+      });
+
+      if (response.ok) {
+        await loadFiles();
+      } else {
+        let errorMessage = "فشل حذف الملف";
+        try {
+          const errorData = await response.json();
+          errorMessage = errorData.error || errorData.message || errorMessage;
+        } catch (parseError) {
+          try {
+            const errorText = await response.text();
+            errorMessage = errorText || errorMessage;
+          } catch (textError) {
+            errorMessage = `خطأ ${response.status}: ${response.statusText}`;
+          }
+        }
+        setError(errorMessage);
+      }
+    } catch (err) {
+      setError("حدث خطأ أثناء حذف الملف");
+      console.error(err);
+    }
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+  };
+
+  const handleDrop = async (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    const droppedFile = e.dataTransfer.files[0];
+    if (droppedFile) {
+      const filename = droppedFile.name;
+      setUploadStatus({ ...uploadStatus, [filename]: "uploading" });
+      setUploading(true);
+
+      try {
+        // Convert file to base64
+        const fileBuffer = await droppedFile.arrayBuffer();
+        const base64 = btoa(
+          new Uint8Array(fileBuffer).reduce(
+            (data, byte) => data + String.fromCharCode(byte),
+            ""
+          )
+        );
+
+        const endpoint = "/api/upload-file";
+
+        const response = await fetch(endpoint, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            file: base64,
+            filename: filename,
+            fileType: droppedFile.type,
+          }),
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          setUploadStatus({ ...uploadStatus, [filename]: "success" });
+          await loadFiles();
+          setTimeout(() => {
+            setUploadStatus((prev) => {
+              const newStatus = { ...prev };
+              delete newStatus[filename];
+              return newStatus;
+            });
+          }, 3000);
+        } else {
+          let errorMessage = "فشل رفع الملف";
+          try {
+            // Read response body once
+            const contentType = response.headers.get("content-type");
+            let errorData: any;
+            
+            if (contentType?.includes("application/json")) {
+              errorData = await response.json();
+              errorMessage = errorData.error || errorData.message || errorMessage;
+              if (errorData.details) {
+                console.error("Error details:", errorData.details);
+              }
+            } else {
+              const errorText = await response.text();
+              errorMessage = errorText || errorMessage;
+            }
+          } catch (parseError) {
+            errorMessage = `خطأ ${response.status}: ${response.statusText}`;
+            console.error("Error parsing response:", parseError);
+          }
+          setUploadStatus({ ...uploadStatus, [filename]: "error" });
+          setError(errorMessage);
+        }
+      } catch (err) {
+        setUploadStatus({ ...uploadStatus, [filename]: "error" });
+        setError("حدث خطأ أثناء رفع الملف");
+        console.error(err);
+      } finally {
+        setUploading(false);
+      }
+    }
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen bg-white flex items-center justify-center">
@@ -135,8 +368,111 @@ export default function AdminPage() {
         {error && (
           <div className="bg-red-50 border-2 border-red-200 text-red-700 px-4 py-3 rounded-xl mb-6" dir="rtl">
             {error}
+            <button
+              onClick={() => setError("")}
+              className="mr-2 text-red-800 hover:text-red-900"
+            >
+              <X size={16} className="inline" />
+            </button>
           </div>
         )}
+
+        {/* File Upload Section */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="bg-white border-2 border-black rounded-2xl p-6 mb-8 shadow-lg"
+          dir="rtl"
+        >
+          <h2 className="text-2xl font-bold text-black mb-4">رفع الملفات</h2>
+          
+          {/* Upload Area */}
+          <div
+            onDragOver={handleDragOver}
+            onDrop={handleDrop}
+            className="border-2 border-dashed border-gray-300 rounded-xl p-8 text-center hover:border-blue-500 transition-colors cursor-pointer"
+            onClick={() => fileInputRef.current?.click()}
+          >
+            <Upload className="mx-auto mb-4 text-gray-400" size={48} />
+            <p className="text-gray-600 mb-2">
+              اسحب الملفات هنا أو انقر للاختيار
+            </p>
+            <p className="text-sm text-gray-400">
+              يدعم: PDF, DOCX, TXT, MD
+            </p>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".pdf,.docx,.txt,.md"
+              onChange={handleFileSelect}
+              className="hidden"
+              disabled={uploading}
+            />
+          </div>
+
+          {/* Upload Status */}
+          {Object.keys(uploadStatus).length > 0 && (
+            <div className="mt-4 space-y-2">
+              {Object.entries(uploadStatus).map(([filename, status]) => (
+                <div
+                  key={filename}
+                  className={`flex items-center justify-between p-3 rounded-lg ${
+                    status === "success"
+                      ? "bg-green-50 text-green-700"
+                      : status === "error"
+                      ? "bg-red-50 text-red-700"
+                      : "bg-blue-50 text-blue-700"
+                  }`}
+                >
+                  <span className="flex items-center gap-2">
+                    <FileText size={16} />
+                    {filename}
+                  </span>
+                  <span className="text-sm">
+                    {status === "uploading" && "جاري الرفع..."}
+                    {status === "success" && "تم الرفع بنجاح"}
+                    {status === "error" && "فشل الرفع"}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Uploaded Files List */}
+          {files.length > 0 && (
+            <div className="mt-6">
+              <h3 className="text-xl font-bold text-black mb-4">الملفات المرفوعة</h3>
+              <div className="space-y-2">
+                {files.map((file) => (
+                  <div
+                    key={file.filename}
+                    className="flex items-center justify-between p-4 bg-gray-50 rounded-lg border border-gray-200"
+                  >
+                    <div className="flex items-center gap-3">
+                      <FileText className="text-gray-600" size={20} />
+                      <div>
+                        <p className="font-medium text-gray-900">{file.filename}</p>
+                        <p className="text-sm text-gray-500">
+                          {file.fileType} • {file.chunkCount} أجزاء •{" "}
+                          {new Date(file.uploadedAt).toLocaleDateString("ar-SA")}
+                        </p>
+                      </div>
+                    </div>
+                    <Button
+                      onClick={() => handleDeleteFile(file.filename)}
+                      variant="outline"
+                      className="border-2 border-red-500 text-red-500 hover:bg-red-50"
+                      size="sm"
+                    >
+                      <Trash2 size={16} className="mr-1" />
+                      حذف
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </motion.div>
 
         {/* Users Table */}
         <motion.div

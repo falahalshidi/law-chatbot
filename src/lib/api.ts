@@ -1,5 +1,4 @@
 import type { Message } from "@/types/chat";
-import { PINECONE_API_KEY, OPENAI_API_KEY, USE_OPENAI_DIRECT } from "./env";
 
 export async function sendMessage(
   userMessage: string,
@@ -18,39 +17,16 @@ export async function sendMessage(
       content: userMessage,
     });
 
-    // Determine which endpoint to use
-    const useOpenAI = USE_OPENAI_DIRECT && OPENAI_API_KEY;
-
-    // Use Vite proxy in development, Netlify Function in production
-    // Check if we're in development mode (Vite sets this)
-    const isDevelopment = typeof window !== 'undefined' && window.location.hostname === 'localhost';
-    const endpoint = useOpenAI
-      ? "https://api.openai.com/v1/chat/completions"
-      : isDevelopment
-        ? "/api/pinecone"  // Use Vite proxy in development
-        : "/.netlify/functions/chat";  // Use Netlify Function in production
+    // Use local API endpoint
+    const endpoint = "/api/chat";
 
     console.log("Sending request to:", endpoint);
-    console.log("Request payload:", { model: "gpt-4o", messages: messages.length });
-    console.log("Using proxy:", isDevelopment && !useOpenAI);
+    console.log("Request payload:", { messages: messages.length });
 
     // Prepare headers
     const headers: HeadersInit = {
       "Content-Type": "application/json",
     };
-
-    if (useOpenAI) {
-      headers["Authorization"] = `Bearer ${OPENAI_API_KEY}`;
-    } else {
-      // Pinecone Assistant API requires Accept header
-      headers["Accept"] = "application/json, text/event-stream";
-
-      if (!isDevelopment) {
-        // Only add these headers if not using proxy (proxy adds them automatically)
-        // Pinecone Assistant API only requires Api-Key header, not Authorization
-        headers["Api-Key"] = PINECONE_API_KEY;
-      }
-    }
 
     // Try API endpoint
     let response: Response;
@@ -58,20 +34,9 @@ export async function sendMessage(
       response = await fetch(endpoint, {
         method: "POST",
         headers: headers,
-        body: JSON.stringify(
-          useOpenAI
-            ? {
-              model: "gpt-4o",
-              messages: messages,
-              temperature: 0.7,
-              max_tokens: 2000,
-              stream: false,
-            }
-            : {
-              messages: messages,
-              stream: false,
-            }
-        ),
+        body: JSON.stringify({
+          messages: messages,
+        }),
       });
     } catch (fetchError) {
       console.error("Fetch error:", fetchError);
@@ -81,12 +46,9 @@ export async function sendMessage(
         if (fetchError.message.includes("Failed to fetch") || fetchError.message.includes("fetch")) {
           throw new Error(
             "لا يمكن الاتصال بالخادم. قد تكون المشكلة:\n" +
-            "1. مشكلة CORS - جرب استخدام OpenAI مباشرة\n" +
-            "2. تحقق من اتصالك بالإنترنت\n" +
-            "3. تأكد من أن الخادم يعمل\n\n" +
-            "للحل: أنشئ ملف .env وأضف:\n" +
-            "VITE_OPENAI_API_KEY=your-key\n" +
-            "VITE_USE_OPENAI_DIRECT=true"
+            "1. تحقق من اتصالك بالإنترنت\n" +
+            "2. تأكد من أن Ollama يعمل\n" +
+            "3. تأكد من أن Netlify Functions تعمل بشكل صحيح"
           );
         }
       }
@@ -141,14 +103,9 @@ export async function sendMessage(
 
     console.log("Response data:", data);
 
-    // Handle Pinecone Assistant API response format
-    // Based on Python example: resp["message"]["content"]
+    // Handle response format from chat function (Ollama + ChromaDB)
     if (data.message && data.message.content) {
       return data.message.content;
-    } else if (data.choices && data.choices[0] && data.choices[0].message) {
-      return data.choices[0].message.content;
-    } else if (data.choices && data.choices[0] && data.choices[0].text) {
-      return data.choices[0].text;
     } else if (data.content) {
       return data.content;
     } else if (data.message) {

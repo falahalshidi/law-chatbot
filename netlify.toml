@@ -6,6 +6,15 @@
 [functions]
   node_bundler = "esbuild"
 
+[build.environment]
+  # ChromaDB Configuration
+  CHROMADB_API_KEY = "ck-3EDSUCED38no4aLq8rgMXzTwe14fvnATpGEkwWMgrkEV"
+  CHROMADB_TENANT = "bf8e9ba0-6e6f-4365-a930-2c5ef360f292"
+  CHROMADB_DATABASE = "lawchat"
+  # Ollama Configuration
+  OLLAMA_URL = "http://localhost:11434"
+  OLLAMA_MODEL = "llama2"
+
 [[redirects]]
   from = "/*"
   to = "/index.html"
