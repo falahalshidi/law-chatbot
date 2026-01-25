@@ -13,8 +13,6 @@ export default function ChatPage() {
       navigate("/login");
       return;
     }
-
-    const user = JSON.parse(userStr);
     
     // Check if user is approved
     // Note: In a real app, you'd verify this with the server

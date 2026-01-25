@@ -50,7 +50,7 @@ export default function SignupPage() {
       const hashedPassword = await hashPassword(password);
 
       // Create new user
-      const { data, error: insertError } = await supabase
+      const { error: insertError } = await supabase
         .from("users")
         .insert([
           {

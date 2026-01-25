@@ -9,7 +9,6 @@ export default function AdminPage() {
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [currentUser, setCurrentUser] = useState<any>(null);
 
   useEffect(() => {
     // Check if user is logged in and is admin
@@ -20,7 +19,6 @@ export default function AdminPage() {
     }
 
     const user = JSON.parse(userStr);
-    setCurrentUser(user);
 
     if (!user.is_admin) {
       navigate("/chat");
