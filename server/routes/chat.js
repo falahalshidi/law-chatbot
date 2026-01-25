@@ -90,6 +90,36 @@ async function getAvailableModels() {
   }
 }
 
+// Helper function to call Ollama with a specific model
+async function callOllamaWithModel(messages, modelName) {
+  const response = await fetch(`${OLLAMA_URL}/api/chat`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: modelName,
+      messages: messages,
+      stream: false,
+      options: {
+        num_predict: 512,
+        temperature: 0.7,
+        num_ctx: 1024,
+        num_thread: 4,
+      },
+    }),
+    signal: AbortSignal.timeout(300000),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Ollama API error (${response.status}): ${errorText}`);
+  }
+
+  const data = await response.json();
+  return data.message?.content || data.response || "لا يمكن الحصول على رد من Ollama";
+}
+
 async function callOllama(messages) {
   try {
     console.log("Calling Ollama at:", OLLAMA_URL);
@@ -105,17 +135,39 @@ async function callOllama(messages) {
     
     // Try to find a suitable model
     let modelToUse = OLLAMA_MODEL;
-    if (!availableModels.includes(OLLAMA_MODEL)) {
-      // Try common alternatives
-      const alternatives = ['llama2', 'llama3', 'mistral', 'phi', 'gemma', 'qwen'];
-      const foundModel = alternatives.find(m => availableModels.includes(m));
+    
+    // Helper function to check if a model name matches (handles :latest, :7b, etc.)
+    const modelMatches = (modelName, availableModel) => {
+      const baseName = modelName.split(':')[0];
+      const availableBase = availableModel.split(':')[0];
+      return baseName === availableBase || availableModel === modelName || availableModel.startsWith(modelName + ':');
+    };
+    
+    // Check if the configured model exists (with or without tag)
+    const exactMatch = availableModels.find(m => modelMatches(OLLAMA_MODEL, m));
+    if (exactMatch) {
+      modelToUse = exactMatch;
+    } else if (!availableModels.includes(OLLAMA_MODEL)) {
+      // Try common alternatives, prioritizing smaller/faster models
+      const alternatives = ['phi', 'gemma', 'qwen', 'llama2', 'llama3', 'mistral'];
+      const foundModel = alternatives.find(alt => {
+        return availableModels.find(m => modelMatches(alt, m));
+      });
       
       if (foundModel) {
-        console.log(`⚠️ Model '${OLLAMA_MODEL}' not found, using '${foundModel}' instead`);
-        modelToUse = foundModel;
+        const matchedModel = availableModels.find(m => modelMatches(foundModel, m));
+        console.log(`⚠️ Model '${OLLAMA_MODEL}' not found, using '${matchedModel}' instead`);
+        modelToUse = matchedModel;
       } else if (availableModels.length > 0) {
-        console.log(`⚠️ Model '${OLLAMA_MODEL}' not found, using '${availableModels[0]}' instead`);
-        modelToUse = availableModels[0];
+        // Prefer smaller models (phi, gemma) if available
+        const smallModels = availableModels.filter(m => 
+          m.toLowerCase().includes('phi') || 
+          m.toLowerCase().includes('gemma') || 
+          m.toLowerCase().includes('qwen')
+        );
+        const preferredModel = smallModels.length > 0 ? smallModels[0] : availableModels[0];
+        console.log(`⚠️ Model '${OLLAMA_MODEL}' not found, using '${preferredModel}' instead`);
+        modelToUse = preferredModel;
       } else {
         throw new Error(`النموذج '${OLLAMA_MODEL}' غير موجود. النماذج المتاحة: ${availableModels.join(', ') || 'لا يوجد'}. قم بتحميل نموذج باستخدام: ollama pull ${OLLAMA_MODEL}`);
       }
@@ -130,8 +182,15 @@ async function callOllama(messages) {
         model: modelToUse,
         messages: messages,
         stream: false,
+        options: {
+          // Optimize for faster responses
+          num_predict: 512, // Further reduce response length for faster generation
+          temperature: 0.7,
+          num_ctx: 1024, // Reduce context window for faster processing
+          num_thread: 4, // Use more CPU threads if available
+        },
       }),
-      signal: AbortSignal.timeout(60000),
+      signal: AbortSignal.timeout(300000), // 5 minutes timeout
     });
 
     if (!response.ok) {
@@ -156,8 +215,8 @@ async function callOllama(messages) {
       if (error.message.includes("fetch failed") || error.message.includes("ECONNREFUSED")) {
         throw new Error(`لا يمكن الاتصال بـ Ollama على ${OLLAMA_URL}. تأكد من أن Ollama يعمل وأن URL صحيح.`);
       }
-      if (error.message.includes("timeout")) {
-        throw new Error("انتهت مهلة الاتصال بـ Ollama. حاول مرة أخرى.");
+      if (error.message.includes("timeout") || error.name === "TimeoutError" || error.name === "AbortError") {
+        throw new Error("انتهت مهلة الاتصال بـ Ollama (5 دقائق). النموذج قد يكون بطيئاً جداً. حاول مرة أخرى أو استخدم نموذج أصغر مثل 'phi' أو 'gemma'.");
       }
     }
     throw error;
@@ -184,18 +243,32 @@ export async function chatHandler(req, res) {
     const queryEmbedding = await createEmbedding(userQuery);
     console.log("Query embedding created, length:", queryEmbedding.length);
 
-    const searchResults = await searchRelevantDocuments(queryEmbedding, 5);
+    const searchResults = await searchRelevantDocuments(queryEmbedding, 3); // Reduce context size for faster processing
 
     let context = "";
     if (searchResults && searchResults.documents && searchResults.documents[0]) {
       const relevantDocs = searchResults.documents[0];
       const distances = searchResults.distances?.[0] || [];
       
+      // Limit context length to avoid timeout - reduce to 1000 chars
+      const maxContextLength = 1000; // Further reduce context to ~1000 characters
+      let contextLength = 0;
+      
       context = relevantDocs
         .map((doc, index) => {
           const distance = distances[index] || 1;
-          if (distance < 0.8) {
-            return `[مستند ${index + 1}]:\n${doc}`;
+          if (distance < 0.7 && contextLength < maxContextLength) { // Stricter distance threshold
+            // Truncate each document to max 300 chars
+            const truncatedDoc = doc.length > 300 ? doc.substring(0, 300) + "..." : doc;
+            const docText = `[مستند ${index + 1}]:\n${truncatedDoc}`;
+            if (contextLength + docText.length > maxContextLength) {
+              // Truncate if needed
+              const remaining = maxContextLength - contextLength;
+              contextLength = maxContextLength;
+              return docText.substring(0, remaining) + "...";
+            }
+            contextLength += docText.length;
+            return docText;
           }
           return null;
         })
@@ -203,14 +276,14 @@ export async function chatHandler(req, res) {
         .join("\n\n");
     }
 
+    // Simplified prompt for faster processing
     const systemPrompt = context
-      ? `أنت مساعد قانوني ذكي. استخدم المعلومات التالية من قاعدة البيانات القانونية للإجابة على السؤال. إذا كانت المعلومات غير كافية، استخدم معرفتك العامة.
+      ? `أنت مساعد قانوني. استخدم المعلومات التالية للإجابة:
 
-المعلومات من قاعدة البيانات:
 ${context}
 
-أجب على السؤال بناءً على المعلومات المتوفرة أعلاه.`
-      : `أنت مساعد قانوني ذكي. أجب على السؤال القانوني بشكل واضح ومفيد.`;
+أجب باختصار بناءً على المعلومات أعلاه.`
+      : `أنت مساعد قانوني. أجب على السؤال بشكل واضح ومختصر.`;
 
     const ollamaMessages = [
       {
@@ -225,8 +298,39 @@ ${context}
     ];
 
     console.log("Calling Ollama with", ollamaMessages.length, "messages");
+    console.log("System prompt length:", systemPrompt.length, "characters");
+    console.log("User query length:", userQuery.length, "characters");
 
-    const ollamaResponse = await callOllama(ollamaMessages);
+    // Try with configured model first
+    let ollamaResponse;
+    try {
+      ollamaResponse = await callOllama(ollamaMessages);
+    } catch (error) {
+      // If timeout, try with a smaller model
+      if (error.message.includes("timeout") || error.message.includes("مهلة")) {
+        console.log("⚠️ Timeout occurred, attempting with smaller model...");
+        const availableModels = await getAvailableModels();
+        const smallModels = availableModels.filter(m => 
+          m.toLowerCase().includes('phi') || 
+          m.toLowerCase().includes('gemma')
+        );
+        
+        if (smallModels.length > 0) {
+          const smallerModel = smallModels[0];
+          console.log(`🔄 Retrying with smaller model: ${smallerModel}`);
+          try {
+            ollamaResponse = await callOllamaWithModel(ollamaMessages, smallerModel);
+            console.log("✅ Success with smaller model");
+          } catch (retryError) {
+            throw error; // Re-throw original error if retry also fails
+          }
+        } else {
+          throw error; // Re-throw if no smaller model available
+        }
+      } else {
+        throw error; // Re-throw non-timeout errors
+      }
+    }
 
     console.log("Ollama response received");
 
