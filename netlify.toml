@@ -6,6 +6,8 @@
 [functions]
   node_bundler = "esbuild"
   external_node_modules = ["cohere-ai", "ollama"]
+  # Increase timeout for functions that load ML models
+  timeout = 60
 
 [build.environment]
   # ChromaDB Configuration

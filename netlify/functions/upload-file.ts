@@ -1,3 +1,14 @@
+// Polyfill for import.meta.url in Netlify Functions (serverless environment)
+// This must be done BEFORE importing @xenova/transformers
+if (typeof import.meta === "undefined" || typeof import.meta.url === "undefined") {
+  // @ts-ignore
+  globalThis.import = globalThis.import || {};
+  // @ts-ignore
+  globalThis.import.meta = globalThis.import.meta || {};
+  // @ts-ignore
+  globalThis.import.meta.url = `file://${process.cwd()}/netlify/functions/upload-file.ts`;
+}
+
 import type { HandlerEvent, HandlerContext } from "@netlify/functions";
 import { CloudClient } from "chromadb";
 import pdfParse from "pdf-parse";
@@ -7,9 +18,25 @@ import { pipeline, env } from "@xenova/transformers";
 // Disable local model files for serverless
 env.allowLocalModels = false;
 // Fix for Netlify Functions - prevent fileURLToPath error
-if (typeof process !== "undefined" && process.env.NETLIFY) {
-  // Set a dummy path to prevent errors
+// Configure environment to avoid using import.meta.url
+if (typeof process !== "undefined") {
+  // Prevent fileURLToPath errors in serverless environment
+  // Set paths that don't require import.meta.url
   (env as any).localModelPath = "/tmp";
+  (env as any).cacheDir = "/tmp";
+  (env as any).useBrowserCache = false;
+  (env as any).useCustomCache = false;
+  // Try to set a fake import.meta.url if possible
+  try {
+    // @ts-ignore - attempt to set import.meta.url
+    if (typeof import.meta !== "undefined" && !import.meta.url) {
+      // @ts-ignore
+      import.meta.url = `file:///tmp/netlify/functions/upload-file.ts`;
+    }
+  } catch (e) {
+    // Ignore - import.meta is read-only in some environments
+    console.log("Could not set import.meta.url polyfill:", e);
+  }
 }
 
 const CHROMADB_API_KEY = process.env.CHROMADB_API_KEY || process.env.VITE_CHROMADB_API_KEY || "ck-3EDSUCED38no4aLq8rgMXzTwe14fvnATpGEkwWMgrkEV";
@@ -30,10 +57,6 @@ let embeddingModel: any = null;
 
 async function getEmbeddingModel() {
   if (!embeddingModel) {
-    // Configure for serverless environment
-    env.useBrowserCache = false;
-    env.useCustomCache = false;
-    
     embeddingModel = await pipeline(
       "feature-extraction",
       "Xenova/all-MiniLM-L6-v2",

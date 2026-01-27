@@ -1,3 +1,14 @@
+// Polyfill for import.meta.url in Netlify Functions (serverless environment)
+// This must be done BEFORE importing @xenova/transformers
+if (typeof import.meta === "undefined" || typeof import.meta.url === "undefined") {
+  // @ts-ignore
+  globalThis.import = globalThis.import || {};
+  // @ts-ignore
+  globalThis.import.meta = globalThis.import.meta || {};
+  // @ts-ignore
+  globalThis.import.meta.url = `file://${process.cwd()}/netlify/functions/chat.ts`;
+}
+
 import type { HandlerEvent, HandlerContext } from "@netlify/functions";
 import { CloudClient } from "chromadb";
 import { pipeline, env } from "@xenova/transformers";
@@ -5,13 +16,25 @@ import { pipeline, env } from "@xenova/transformers";
 // Disable local model files for serverless
 env.allowLocalModels = false;
 // Fix for Netlify Functions - prevent fileURLToPath error
-// Set environment variables before any imports that use import.meta.url
+// Configure environment to avoid using import.meta.url
 if (typeof process !== "undefined") {
   // Prevent fileURLToPath errors in serverless environment
+  // Set paths that don't require import.meta.url
   (env as any).localModelPath = "/tmp";
   (env as any).cacheDir = "/tmp";
   (env as any).useBrowserCache = false;
   (env as any).useCustomCache = false;
+  // Try to set a fake import.meta.url if possible
+  try {
+    // @ts-ignore - attempt to set import.meta.url
+    if (typeof import.meta !== "undefined" && !import.meta.url) {
+      // @ts-ignore
+      import.meta.url = `file:///tmp/netlify/functions/chat.ts`;
+    }
+  } catch (e) {
+    // Ignore - import.meta is read-only in some environments
+    console.log("Could not set import.meta.url polyfill:", e);
+  }
 }
 
 const CHROMADB_API_KEY = process.env.CHROMADB_API_KEY || process.env.VITE_CHROMADB_API_KEY || "ck-3EDSUCED38no4aLq8rgMXzTwe14fvnATpGEkwWMgrkEV";
