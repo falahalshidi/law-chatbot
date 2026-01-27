@@ -1,8 +1,10 @@
 import mammoth from "mammoth";
 import * as pdfjsLib from "pdfjs-dist";
 
-// Configure PDF.js worker
-pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
+// Configure PDF.js worker - use local worker file instead of CDN
+// The worker file is copied to public directory during build by Vite plugin
+// This ensures it works in production environments like Netlify
+pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';
 
 /**
  * Extract text from PDF file (browser-compatible)
