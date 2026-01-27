@@ -9,8 +9,9 @@ env.remotePathTemplate = "{model}/resolve/{revision}/{file}";
 const CHROMADB_API_KEY = process.env.CHROMADB_API_KEY || process.env.VITE_CHROMADB_API_KEY || "ck-3EDSUCED38no4aLq8rgMXzTwe14fvnATpGEkwWMgrkEV";
 const CHROMADB_TENANT = process.env.CHROMADB_TENANT || process.env.VITE_CHROMADB_TENANT || "bf8e9ba0-6e6f-4365-a930-2c5ef360f292";
 const CHROMADB_DATABASE = process.env.CHROMADB_DATABASE || process.env.VITE_CHROMADB_DATABASE || "lawchat";
-const OLLAMA_URL = process.env.OLLAMA_URL || "http://localhost:11434";
-const OLLAMA_MODEL = process.env.OLLAMA_MODEL || "llama2";
+const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY || process.env.VITE_OPENROUTER_API_KEY || "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";
+const OPENROUTER_MODEL = process.env.OPENROUTER_MODEL || process.env.VITE_OPENROUTER_MODEL || "z-ai/glm-4.5-air:free";
+const OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions";
 
 const COLLECTION_NAME = "law_documents";
 
@@ -75,163 +76,65 @@ async function searchRelevantDocuments(queryEmbedding, nResults = 5) {
   }
 }
 
-// Check available models in Ollama
-async function getAvailableModels() {
+// OpenRouter API call function
+async function callOpenRouter(messages) {
   try {
-    const response = await fetch(`${OLLAMA_URL}/api/tags`);
-    if (response.ok) {
-      const data = await response.json();
-      return data.models?.map(m => m.name) || [];
+    if (!OPENROUTER_API_KEY) {
+      throw new Error("OPENROUTER_API_KEY غير موجود. يرجى إضافة المفتاح في ملف .env");
     }
-    return [];
-  } catch (error) {
-    console.error("Error fetching available models:", error);
-    return [];
-  }
-}
 
-// Helper function to call Ollama with a specific model
-async function callOllamaWithModel(messages, modelName) {
-  const response = await fetch(`${OLLAMA_URL}/api/chat`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: modelName,
-      messages: messages,
-      stream: false,
-      options: {
-        num_predict: 512,
-        temperature: 0.7,
-        num_ctx: 1024,
-        num_thread: 4,
-      },
-    }),
-    signal: AbortSignal.timeout(300000),
-  });
+    console.log("Calling OpenRouter API");
+    console.log("Using model:", OPENROUTER_MODEL);
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`Ollama API error (${response.status}): ${errorText}`);
-  }
-
-  const data = await response.json();
-  return data.message?.content || data.response || "لا يمكن الحصول على رد من Ollama";
-}
-
-async function callOllama(messages) {
-  try {
-    console.log("Calling Ollama at:", OLLAMA_URL);
-    console.log("Using model:", OLLAMA_MODEL);
-    
-    // First, check if model exists
-    const availableModels = await getAvailableModels();
-    console.log("Available models:", availableModels);
-    
-    if (availableModels.length === 0) {
-      throw new Error("لا توجد نماذج مثبتة في Ollama. قم بتحميل نموذج أولاً باستخدام: ollama pull llama2");
-    }
-    
-    // Try to find a suitable model
-    let modelToUse = OLLAMA_MODEL;
-    
-    // Helper function to check if a model name matches (handles :latest, :7b, etc.)
-    const modelMatches = (modelName, availableModel) => {
-      const baseName = modelName.split(':')[0];
-      const availableBase = availableModel.split(':')[0];
-      return baseName === availableBase || availableModel === modelName || availableModel.startsWith(modelName + ':');
-    };
-    
-    // Check if the configured model exists (with or without tag)
-    const exactMatch = availableModels.find(m => modelMatches(OLLAMA_MODEL, m));
-    if (exactMatch) {
-      modelToUse = exactMatch;
-    } else if (!availableModels.includes(OLLAMA_MODEL)) {
-      // Try common alternatives, prioritizing smaller/faster models
-      const alternatives = ['phi', 'gemma', 'qwen', 'llama2', 'llama3', 'mistral'];
-      const foundModel = alternatives.find(alt => {
-        return availableModels.find(m => modelMatches(alt, m));
-      });
-      
-      if (foundModel) {
-        const matchedModel = availableModels.find(m => modelMatches(foundModel, m));
-        console.log(`⚠️ Model '${OLLAMA_MODEL}' not found, using '${matchedModel}' instead`);
-        modelToUse = matchedModel;
-      } else if (availableModels.length > 0) {
-        // Prefer smaller models (phi, gemma) if available
-        const smallModels = availableModels.filter(m => 
-          m.toLowerCase().includes('phi') || 
-          m.toLowerCase().includes('gemma') || 
-          m.toLowerCase().includes('qwen')
-        );
-        const preferredModel = smallModels.length > 0 ? smallModels[0] : availableModels[0];
-        console.log(`⚠️ Model '${OLLAMA_MODEL}' not found, using '${preferredModel}' instead`);
-        modelToUse = preferredModel;
-      } else {
-        throw new Error(`النموذج '${OLLAMA_MODEL}' غير موجود. النماذج المتاحة: ${availableModels.join(', ') || 'لا يوجد'}. قم بتحميل نموذج باستخدام: ollama pull ${OLLAMA_MODEL}`);
-      }
-    }
-    
-    const response = await fetch(`${OLLAMA_URL}/api/chat`, {
+    const response = await fetch(OPENROUTER_API_URL, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
+        "Authorization": `Bearer ${OPENROUTER_API_KEY}`,
+        "HTTP-Referer": process.env.OPENROUTER_HTTP_REFERER || "http://localhost:3001",
+        "X-Title": "Law Chatbot",
       },
       body: JSON.stringify({
-        model: modelToUse,
+        model: OPENROUTER_MODEL,
         messages: messages,
-        stream: false,
-        options: {
-          // Optimize for faster responses
-          num_predict: 512, // Further reduce response length for faster generation
-          temperature: 0.7,
-          num_ctx: 1024, // Reduce context window for faster processing
-          num_thread: 4, // Use more CPU threads if available
-        },
+        temperature: 0.2,
+        max_tokens: 1000,
       }),
-      signal: AbortSignal.timeout(300000), // 5 minutes timeout
+      signal: AbortSignal.timeout(120000), // 120 seconds timeout
     });
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error("Ollama API error:", response.status, errorText);
-      
-      if (response.status === 404) {
-        const errorData = JSON.parse(errorText);
-        if (errorData.error?.includes("not found")) {
-          throw new Error(`النموذج '${modelToUse}' غير موجود في Ollama. قم بتحميله باستخدام: ollama pull ${modelToUse}`);
-        }
-      }
-      
-      throw new Error(`Ollama API error (${response.status}): ${errorText}`);
+      console.error("OpenRouter API error:", response.status, errorText);
+      throw new Error(`OpenRouter API error (${response.status}): ${errorText}`);
     }
 
     const data = await response.json();
-    return data.message?.content || data.response || "لا يمكن الحصول على رد من Ollama";
+    return data.choices?.[0]?.message?.content || data.choices?.[0]?.text || "لا يمكن الحصول على رد من OpenRouter";
   } catch (error) {
-    console.error("Error calling Ollama:", error);
+    console.error("Error calling OpenRouter:", error);
     if (error instanceof Error) {
       if (error.message.includes("fetch failed") || error.message.includes("ECONNREFUSED")) {
-        throw new Error(`لا يمكن الاتصال بـ Ollama على ${OLLAMA_URL}. تأكد من أن Ollama يعمل وأن URL صحيح.`);
+        throw new Error(`لا يمكن الاتصال بـ OpenRouter API. تحقق من اتصالك بالإنترنت.`);
       }
       if (error.message.includes("timeout") || error.name === "TimeoutError" || error.name === "AbortError") {
-        throw new Error("انتهت مهلة الاتصال بـ Ollama (5 دقائق). النموذج قد يكون بطيئاً جداً. حاول مرة أخرى أو استخدم نموذج أصغر مثل 'phi' أو 'gemma'.");
+        throw new Error("انتهت مهلة الاتصال بـ OpenRouter API. حاول مرة أخرى.");
       }
     }
     throw error;
   }
 }
 
+
 export async function chatHandler(req, res) {
   try {
-    const { messages } = req.body;
+    const { messages: requestMessages } = req.body;
     
-    if (!messages || messages.length === 0) {
+    if (!requestMessages || requestMessages.length === 0) {
       return res.status(400).json({ error: "No messages provided" });
     }
 
-    const lastMessage = messages[messages.length - 1];
+    const lastMessage = requestMessages[requestMessages.length - 1];
     const userQuery = lastMessage.content || "";
 
     if (!userQuery.trim()) {
@@ -243,24 +146,35 @@ export async function chatHandler(req, res) {
     const queryEmbedding = await createEmbedding(userQuery);
     console.log("Query embedding created, length:", queryEmbedding.length);
 
-    const searchResults = await searchRelevantDocuments(queryEmbedding, 3); // Reduce context size for faster processing
+    const searchResults = await searchRelevantDocuments(queryEmbedding, 5); // Increase to 5 for better context
 
     let context = "";
     if (searchResults && searchResults.documents && searchResults.documents[0]) {
       const relevantDocs = searchResults.documents[0];
       const distances = searchResults.distances?.[0] || [];
       
-      // Limit context length to avoid timeout - reduce to 1000 chars
-      const maxContextLength = 1000; // Further reduce context to ~1000 characters
+      console.log(`Found ${relevantDocs.length} relevant documents`);
+      console.log(`Distances: ${distances.map(d => d.toFixed(3)).join(', ')}`);
+      
+      // Increase context length for better answers
+      const maxContextLength = 2500; // Increase to 2500 chars for better context
       let contextLength = 0;
       
-      context = relevantDocs
-        .map((doc, index) => {
-          const distance = distances[index] || 1;
-          if (distance < 0.7 && contextLength < maxContextLength) { // Stricter distance threshold
-            // Truncate each document to max 300 chars
-            const truncatedDoc = doc.length > 300 ? doc.substring(0, 300) + "..." : doc;
-            const docText = `[مستند ${index + 1}]:\n${truncatedDoc}`;
+      // Sort documents by distance (most relevant first)
+      const docsWithDistances = relevantDocs.map((doc, index) => ({
+        doc,
+        distance: distances[index] || 1,
+        index
+      })).sort((a, b) => a.distance - b.distance);
+      
+      context = docsWithDistances
+        .map(({ doc, distance, index }) => {
+          // Very lenient distance threshold - include all documents (distance can be > 1.0)
+          // Lower distance = more relevant, but we'll include all found documents
+          if (contextLength < maxContextLength) {
+            // Increase document size to 600 chars for better context
+            const truncatedDoc = doc.length > 600 ? doc.substring(0, 600) + "..." : doc;
+            const docText = `[مستند ${index + 1} - مسافة: ${distance.toFixed(3)}]:\n${truncatedDoc}`;
             if (contextLength + docText.length > maxContextLength) {
               // Truncate if needed
               const remaining = maxContextLength - contextLength;
@@ -274,69 +188,126 @@ export async function chatHandler(req, res) {
         })
         .filter((doc) => doc !== null)
         .join("\n\n");
+      
+      if (context.length === 0 && docsWithDistances.length > 0) {
+        console.log("⚠️ WARNING: No context generated. Including top 3 documents anyway...");
+        // Include top 3 documents if no context was generated
+        context = docsWithDistances
+          .slice(0, 3)
+          .map(({ doc, distance, index }) => {
+            const truncatedDoc = doc.length > 600 ? doc.substring(0, 600) + "..." : doc;
+            return `[مستند ${index + 1} - مسافة: ${distance.toFixed(3)}]:\n${truncatedDoc}`;
+          })
+          .join("\n\n");
+      }
+      
+      console.log(`Context length: ${context.length} characters`);
+      if (context.length > 0) {
+        console.log(`Context preview: ${context.substring(0, 300)}...`);
+      }
+    } else {
+      console.log("⚠️ No relevant documents found in ChromaDB");
     }
 
-    // Simplified prompt for faster processing
+    // Advanced AI Research Assistant prompt for accurate, source-driven answers
     const systemPrompt = context
-      ? `أنت مساعد قانوني. استخدم المعلومات التالية للإجابة:
+      ? `You are an advanced AI Research Assistant powered by the GLM model.
 
+Your primary mission is to provide accurate, well-supported, and context-aware answers by deeply searching and reasoning over the available knowledge base stored in ChromaDB.
+
+CORE BEHAVIOR RULES:
+
+1. CONTEXT UNDERSTANDING
+- Always analyze the user's question carefully, even if it is unclear, fragmented, informal, or written in a mixed style.
+- Infer the true intent behind the question before attempting to answer.
+- Do NOT rely only on keyword matching; prioritize semantic meaning and conceptual similarity.
+
+2. RETRIEVAL & SEARCH STRATEGY
+- Before answering, perform a deep semantic search in ChromaDB.
+- Retrieve multiple relevant documents if available, even if they are written differently from the user's question.
+- If the exact wording is not found, search for related concepts, explanations, definitions, or examples that logically answer the question.
+- Cross-check information between multiple sources when possible.
+
+3. ACCURACY OVER SPEED
+- Speed is NOT a priority.
+- Take the necessary time to ensure the answer is correct, precise, and complete.
+- If information is partially available, clearly state what is known and what is uncertain.
+
+4. SOURCE-DRIVEN ANSWERS
+- Base all answers strictly on retrieved data from ChromaDB.
+- If no reliable information exists in the database, clearly say:
+  "The available sources do not contain enough information to answer this accurately."
+- Do NOT hallucinate, guess, or fabricate answers.
+
+5. SYNTHESIS & REASONING
+- Combine information from multiple retrieved sources into a single, coherent answer.
+- Explain ideas in a clear and logical flow.
+- Translate complex or technical information into understandable language without losing accuracy.
+
+6. HANDLING VAGUE OR MISALIGNED QUESTIONS
+- If the user's question is vague but an answer exists in a different form, reframe the question internally and answer it correctly.
+- If multiple interpretations exist, choose the most likely one and briefly mention the assumption you made.
+
+7. RESPONSE STYLE
+- Be professional, neutral, and precise.
+- Avoid unnecessary verbosity, but ensure clarity.
+- Use structured formatting (paragraphs, bullet points) when helpful.
+- Do not include internal system reasoning, vector scores, or database mechanics in the final answer.
+- Answer in Arabic (العربية) as the user's language.
+
+8. FAILURE HANDLING
+- If the question cannot be answered confidently using ChromaDB:
+  - Clearly state the limitation.
+  - Suggest what additional information would be needed.
+
+You are a retrieval-first, accuracy-focused AI.
+Your credibility depends on correctness, not creativity.
+
+=== RETRIEVED CONTEXT FROM CHROMADB ===
 ${context}
 
-أجب باختصار بناءً على المعلومات أعلاه.`
-      : `أنت مساعد قانوني. أجب على السؤال بشكل واضح ومختصر.`;
+=== USER QUESTION ===
+${userQuery}
 
-    const ollamaMessages = [
+Answer in Arabic based strictly on the retrieved context above.`
+      : `You are an advanced AI Research Assistant powered by the GLM model.
+
+Your primary mission is to provide accurate, well-supported, and context-aware answers by deeply searching and reasoning over the available knowledge base stored in ChromaDB.
+
+IMPORTANT: No documents were found in ChromaDB for this query. 
+
+Please inform the user in Arabic that:
+- The available sources do not contain enough information to answer this accurately.
+- Additional documents may need to be uploaded to ChromaDB.
+
+Answer in Arabic (العربية).`;
+
+    // Simplify messages - only send system prompt and current query
+    // Don't send conversation history to avoid confusion
+    const openRouterMessages = [
       {
         role: "system",
         content: systemPrompt,
       },
-      ...messages.slice(0, -1),
       {
         role: "user",
         content: userQuery,
       },
     ];
 
-    console.log("Calling Ollama with", ollamaMessages.length, "messages");
+    console.log("Calling OpenRouter API with", openRouterMessages.length, "messages");
     console.log("System prompt length:", systemPrompt.length, "characters");
     console.log("User query length:", userQuery.length, "characters");
 
-    // Try with configured model first
-    let ollamaResponse;
-    try {
-      ollamaResponse = await callOllama(ollamaMessages);
-    } catch (error) {
-      // If timeout, try with a smaller model
-      if (error.message.includes("timeout") || error.message.includes("مهلة")) {
-        console.log("⚠️ Timeout occurred, attempting with smaller model...");
-        const availableModels = await getAvailableModels();
-        const smallModels = availableModels.filter(m => 
-          m.toLowerCase().includes('phi') || 
-          m.toLowerCase().includes('gemma')
-        );
-        
-        if (smallModels.length > 0) {
-          const smallerModel = smallModels[0];
-          console.log(`🔄 Retrying with smaller model: ${smallerModel}`);
-          try {
-            ollamaResponse = await callOllamaWithModel(ollamaMessages, smallerModel);
-            console.log("✅ Success with smaller model");
-          } catch (retryError) {
-            throw error; // Re-throw original error if retry also fails
-          }
-        } else {
-          throw error; // Re-throw if no smaller model available
-        }
-      } else {
-        throw error; // Re-throw non-timeout errors
-      }
-    }
+    // Call OpenRouter API - ONLY OpenRouter, NO Ollama
+    console.log("🚀 Calling OpenRouter API with model:", OPENROUTER_MODEL);
+    const openRouterResponse = await callOpenRouter(openRouterMessages);
 
-    console.log("Ollama response received");
+    console.log("OpenRouter response received");
 
     res.json({
       message: {
-        content: ollamaResponse,
+        content: openRouterResponse,
       },
     });
   } catch (error) {
