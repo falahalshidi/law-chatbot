@@ -1,4 +1,4 @@
-import type { Handler, HandlerEvent, HandlerContext } from "@netlify/functions";
+import type { HandlerEvent, HandlerContext } from "@netlify/functions";
 import { CloudClient } from "chromadb";
 import pdfParse from "pdf-parse";
 import mammoth from "mammoth";
@@ -104,7 +104,7 @@ async function getCollection() {
   try {
     const collection = await chromaClient.getCollection({
       name: COLLECTION_NAME,
-    });
+    } as any);
     return collection;
   } catch (error) {
     console.log("Collection not found, creating new one...");
@@ -120,7 +120,7 @@ async function getCollection() {
   }
 }
 
-const handler: Handler = async (event: HandlerEvent, context: HandlerContext) => {
+const handler = async (event: HandlerEvent, _context: HandlerContext) => {
   // Handle CORS preflight
   if (event.httpMethod === "OPTIONS") {
     return {
@@ -129,6 +129,7 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext) =>
         "Access-Control-Allow-Origin": "*",
         "Access-Control-Allow-Headers": "Content-Type",
         "Access-Control-Allow-Methods": "POST, OPTIONS, DELETE, GET",
+        "Content-Type": "application/json",
       },
       body: "",
     };
@@ -143,7 +144,7 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext) =>
       const filesMap = new Map<string, { fileType: string; uploadedAt: string; chunkCount: number }>();
 
       if (allData.metadatas && allData.ids) {
-        allData.metadatas.forEach((metadata: any, index: number) => {
+        allData.metadatas.forEach((metadata: any) => {
           if (metadata && metadata.filename) {
             if (!filesMap.has(metadata.filename)) {
               filesMap.set(metadata.filename, {

@@ -1,4 +1,4 @@
-import type { Handler, HandlerEvent, HandlerContext } from "@netlify/functions";
+import type { HandlerEvent, HandlerContext } from "@netlify/functions";
 import { CloudClient } from "chromadb";
 import { pipeline, env } from "@xenova/transformers";
 
@@ -49,7 +49,7 @@ async function searchRelevantDocuments(queryEmbedding: number[], nResults: numbe
   try {
     const collection = await chromaClient.getCollection({
       name: COLLECTION_NAME,
-    });
+    } as any);
 
     const results = await collection.query({
       queryEmbeddings: [queryEmbedding],
@@ -113,7 +113,7 @@ async function callOllama(messages: Array<{ role: string; content: string }>) {
   }
 }
 
-const handler: Handler = async (event: HandlerEvent, context: HandlerContext) => {
+const handler = async (event: HandlerEvent, _context: HandlerContext) => {
   // Handle CORS preflight
   if (event.httpMethod === "OPTIONS") {
     return {
@@ -122,6 +122,7 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext) =>
         "Access-Control-Allow-Origin": "*",
         "Access-Control-Allow-Headers": "Content-Type",
         "Access-Control-Allow-Methods": "POST, OPTIONS",
+        "Content-Type": "application/json",
       },
       body: "",
     };
@@ -184,7 +185,8 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext) =>
       const distances = searchResults.distances?.[0] || [];
       
       context = relevantDocs
-        .map((doc: string, index: number) => {
+        .map((doc: string | null, index: number) => {
+          if (!doc) return null;
           const distance = distances[index] || 1;
           // Only include documents with reasonable similarity (distance < 0.8)
           if (distance < 0.8) {
@@ -192,7 +194,7 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext) =>
           }
           return null;
         })
-        .filter((doc: string | null) => doc !== null)
+        .filter((doc): doc is string => doc !== null)
         .join("\n\n");
     }
 
