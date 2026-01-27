@@ -17,7 +17,9 @@ export async function sendMessage(
       content: userMessage,
     });
 
-    // Use local API endpoint
+    // Use Netlify Functions endpoint (works on both local and production)
+    // In production (Render static site), this will use Netlify Functions
+    // In local dev, this will use the proxy to Express server
     const endpoint = "/api/chat";
 
     console.log("Sending request to:", endpoint);
