@@ -2,7 +2,8 @@ import { pipeline, env } from "@xenova/transformers";
 
 // Configure transformers for browser
 env.allowLocalModels = false;
-env.remoteURL = "https://huggingface.co";
+// Use type assertion for remoteURL as it may not be in the type definitions
+(env as any).remoteURL = "https://huggingface.co";
 env.remotePathTemplate = "{model}/resolve/{revision}/{file}";
 
 // Initialize embedding model (cached)
@@ -77,7 +78,7 @@ export async function createEmbeddings(chunks: string[]): Promise<number[][]> {
         throw new Error(`No output data from model for chunk ${i}`);
       }
       
-      const embedding = Array.from(output.data);
+      const embedding = Array.from(output.data) as number[];
       if (!embedding || embedding.length === 0) {
         throw new Error(`Empty embedding for chunk ${i}`);
       }

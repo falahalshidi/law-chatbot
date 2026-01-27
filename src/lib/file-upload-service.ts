@@ -11,7 +11,7 @@ async function getCollection() {
   try {
     const collection = await chromaClient.getCollection({
       name: COLLECTION_NAME,
-    });
+    } as any);
     return collection;
   } catch (error) {
     console.log("Collection not found, creating new one...");
@@ -173,7 +173,7 @@ export async function listFiles(): Promise<
     >();
 
     if (allData.metadatas && allData.ids) {
-      allData.metadatas.forEach((metadata: any, index: number) => {
+      allData.metadatas.forEach((metadata: any) => {
         if (metadata && metadata.filename) {
           if (!filesMap.has(metadata.filename)) {
             filesMap.set(metadata.filename, {

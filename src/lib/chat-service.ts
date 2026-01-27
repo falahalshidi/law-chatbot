@@ -16,7 +16,7 @@ async function searchRelevantDocuments(
   try {
     const collection = await chromaClient.getCollection({
       name: COLLECTION_NAME,
-    });
+    } as any);
 
     const results = await collection.query({
       queryEmbeddings: [queryEmbedding],
@@ -99,7 +99,7 @@ async function callOpenRouter(messages: Array<{ role: string; content: string }>
  */
 export async function sendChatMessage(
   userQuery: string,
-  conversationHistory: Array<{ role: string; content: string }> = []
+  _conversationHistory: Array<{ role: string; content: string }> = []
 ): Promise<string> {
   try {
     if (!userQuery.trim()) {
@@ -128,12 +128,17 @@ export async function sendChatMessage(
       let contextLength = 0;
 
       // Sort documents by distance (most relevant first)
+      // Filter out null values before mapping
       const docsWithDistances = relevantDocs
-        .map((doc: string, index: number) => ({
-          doc,
-          distance: distances[index] || 1,
-          index,
-        }))
+        .map((doc: string | null, index: number) => {
+          if (doc === null) return null;
+          return {
+            doc,
+            distance: distances[index] || 1,
+            index,
+          };
+        })
+        .filter((item): item is { doc: string; distance: number; index: number } => item !== null)
         .sort((a, b) => a.distance - b.distance);
 
       context = docsWithDistances
