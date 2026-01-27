@@ -1,1 +1,8 @@
-/*    /index.html   200
+# Redirect API calls to Netlify Functions
+# Use 200! to force redirect even if path exists
+/api/upload-file /.netlify/functions/upload-file 200!
+/api/chat /.netlify/functions/chat 200!
+/api/* /.netlify/functions/:splat 200!
+
+# Catch-all for SPA (must be last)
+/* /index.html 200
