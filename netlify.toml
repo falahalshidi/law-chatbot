@@ -12,10 +12,17 @@
   CHROMADB_API_KEY = "ck-3EDSUCED38no4aLq8rgMXzTwe14fvnATpGEkwWMgrkEV"
   CHROMADB_TENANT = "bf8e9ba0-6e6f-4365-a930-2c5ef360f292"
   CHROMADB_DATABASE = "lawchat"
-  # Ollama Configuration
-  OLLAMA_URL = "http://localhost:11434"
-  OLLAMA_MODEL = "llama2"
+  # OpenRouter Configuration
+  OPENROUTER_API_KEY = "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"
+  OPENROUTER_MODEL = "z-ai/glm-4.5-air:free"
 
+# Redirect API calls to Netlify Functions (must come before catch-all)
+[[redirects]]
+  from = "/api/*"
+  to = "/.netlify/functions/:splat"
+  status = 200
+
+# Catch-all redirect for SPA (must come last)
 [[redirects]]
   from = "/*"
   to = "/index.html"
