@@ -17,10 +17,25 @@
   OPENROUTER_MODEL = "z-ai/glm-4.5-air:free"
 
 # Redirect API calls to Netlify Functions (must come before catch-all)
+# Use force=true to ensure redirects are applied even if path exists
+[[redirects]]
+  from = "/api/upload-file"
+  to = "/.netlify/functions/upload-file"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/api/chat"
+  to = "/.netlify/functions/chat"
+  status = 200
+  force = true
+
+# Generic API redirect for any other /api/* routes
 [[redirects]]
   from = "/api/*"
   to = "/.netlify/functions/:splat"
   status = 200
+  force = true
 
 # Catch-all redirect for SPA (must come last)
 [[redirects]]
