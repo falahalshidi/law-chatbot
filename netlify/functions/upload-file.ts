@@ -74,9 +74,10 @@ function splitTextIntoChunks(text: string, chunkSize: number = 1000, overlap: nu
  */
 async function getCollection() {
   try {
+    // Type assertion needed because ChromaDB Cloud uses default embedding function
     const collection = await chromaClient.getCollection({
       name: COLLECTION_NAME,
-    });
+    } as any);
     return collection;
   } catch (error) {
     console.log("Collection not found, creating new one...");
@@ -84,7 +85,7 @@ async function getCollection() {
       // ChromaDB Cloud will use default embedding function automatically
       const collection = await chromaClient.createCollection({
         name: COLLECTION_NAME,
-      });
+      } as any);
       return collection;
     } catch (createError) {
       console.error("Error creating collection:", createError);

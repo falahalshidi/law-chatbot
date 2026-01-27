@@ -25,9 +25,10 @@ const chromaClient = new CloudClient({
  */
 async function searchRelevantDocuments(queryText: string, nResults: number = 5) {
   try {
+    // Type assertion needed because ChromaDB Cloud uses default embedding function
     const collection = await chromaClient.getCollection({
       name: COLLECTION_NAME,
-    });
+    } as any);
 
     // Use queryTexts instead of queryEmbeddings - ChromaDB Cloud will generate embeddings automatically
     const results = await collection.query({
