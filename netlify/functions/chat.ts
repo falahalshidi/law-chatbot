@@ -4,6 +4,15 @@ import { pipeline, env } from "@xenova/transformers";
 
 // Disable local model files for serverless
 env.allowLocalModels = false;
+// Fix for Netlify Functions - prevent fileURLToPath error
+// Set environment variables before any imports that use import.meta.url
+if (typeof process !== "undefined") {
+  // Prevent fileURLToPath errors in serverless environment
+  (env as any).localModelPath = "/tmp";
+  (env as any).cacheDir = "/tmp";
+  (env as any).useBrowserCache = false;
+  (env as any).useCustomCache = false;
+}
 
 const CHROMADB_API_KEY = process.env.CHROMADB_API_KEY || process.env.VITE_CHROMADB_API_KEY || "ck-3EDSUCED38no4aLq8rgMXzTwe14fvnATpGEkwWMgrkEV";
 const CHROMADB_TENANT = process.env.CHROMADB_TENANT || process.env.VITE_CHROMADB_TENANT || "bf8e9ba0-6e6f-4365-a930-2c5ef360f292";
@@ -27,7 +36,14 @@ async function getEmbeddingModel() {
   if (!embeddingModel) {
     embeddingModel = await pipeline(
       "feature-extraction",
-      "Xenova/all-MiniLM-L6-v2"
+      "Xenova/all-MiniLM-L6-v2",
+      {
+        progress_callback: (progress: any) => {
+          if (progress.status === "downloading") {
+            console.log(`Downloading model: ${Math.round(progress.progress || 0)}%`);
+          }
+        },
+      }
     );
   }
   return embeddingModel;
