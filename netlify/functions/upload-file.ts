@@ -137,26 +137,55 @@ async function createEmbeddings(chunks: string[]): Promise<number[][]> {
 }
 
 /**
- * Get or create collection
+ * Get or create collection with retry logic and better error handling
  */
-async function getCollection() {
-  try {
-    const collection = await chromaClient.getCollection({
-      name: COLLECTION_NAME,
-    } as any);
-    return collection;
-  } catch (error) {
-    console.log("Collection not found, creating new one...");
+async function getCollection(retries = 3) {
+  for (let attempt = 1; attempt <= retries; attempt++) {
     try {
-      const collection = await chromaClient.createCollection({
+      // Try to get existing collection
+      const collection = await chromaClient.getCollection({
         name: COLLECTION_NAME,
-      });
+      } as any);
       return collection;
-    } catch (createError) {
-      console.error("Error creating collection:", createError);
-      throw new Error(`Failed to create ChromaDB collection: ${createError instanceof Error ? createError.message : "Unknown error"}`);
+    } catch (error: any) {
+      // If collection doesn't exist, try to create it
+      if (error.message?.includes("not found") || error.message?.includes("does not exist") || error.message?.includes("NotFound")) {
+        try {
+          console.log("Collection not found, creating new one...");
+          const collection = await chromaClient.createCollection({
+            name: COLLECTION_NAME,
+          });
+          return collection;
+        } catch (createError: any) {
+          if (attempt === retries) {
+            console.error(`Failed to create collection after ${retries} attempts:`, createError);
+            throw new Error(`فشل إنشاء collection في ChromaDB: ${createError.message || "Unknown error"}`);
+          }
+          // Wait before retry
+          await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
+          continue;
+        }
+      }
+      
+      // If it's a connection error, retry
+      if (error.message?.includes("connect") || error.message?.includes("ECONNREFUSED") || error.message?.includes("timeout") || error.message?.includes("Failed to connect")) {
+        if (attempt === retries) {
+          console.error(`Failed to connect to ChromaDB after ${retries} attempts:`, error);
+          throw new Error(`فشل الاتصال بـ ChromaDB. تأكد من أن المفاتيح صحيحة وأن الخدمة متاحة. الخطأ: ${error.message}`);
+        }
+        console.log(`Connection attempt ${attempt} failed, retrying...`);
+        // Wait before retry
+        await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
+        continue;
+      }
+      
+      // For other errors, throw immediately
+      if (attempt === retries) {
+        throw new Error(`فشل الوصول إلى ChromaDB: ${error.message || "Unknown error"}`);
+      }
     }
   }
+  throw new Error("فشل الوصول إلى ChromaDB بعد عدة محاولات");
 }
 
 const handler = async (event: HandlerEvent, _context: HandlerContext) => {
