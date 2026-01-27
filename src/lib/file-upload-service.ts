@@ -1,21 +1,22 @@
 import { chromaClient } from "./chromadb";
 import { extractTextFromFile, splitTextIntoChunks } from "./file-processor";
-import { createEmbeddings } from "./embeddings";
 
 const COLLECTION_NAME = "law_documents";
 
 /**
  * Get or create collection
+ * ChromaDB Cloud will automatically generate embeddings
  */
 async function getCollection() {
   try {
     const collection = await chromaClient.getCollection({
       name: COLLECTION_NAME,
-    } as any);
+    });
     return collection;
   } catch (error) {
     console.log("Collection not found, creating new one...");
     try {
+      // ChromaDB Cloud will use default embedding function automatically
       const collection = await chromaClient.createCollection({
         name: COLLECTION_NAME,
       });
@@ -33,6 +34,7 @@ async function getCollection() {
 
 /**
  * Upload and process a file
+ * ChromaDB Cloud will automatically generate embeddings from the documents
  */
 export async function uploadFile(file: File): Promise<{
   success: boolean;
@@ -70,35 +72,8 @@ export async function uploadFile(file: File): Promise<{
       console.log(`Filtered ${chunks.length - validChunks.length} empty chunks`);
     }
 
-    // Create embeddings
-    console.log("Creating embeddings...");
-    const embeddings = await createEmbeddings(validChunks);
-    console.log(`Created ${embeddings.length} embeddings`);
-
-    // Validate arrays have same length
-    if (validChunks.length !== embeddings.length) {
-      throw new Error(
-        `خطأ في معالجة الملف: أطوال المصفوفات غير متطابقة (chunks: ${validChunks.length}, embeddings: ${embeddings.length})`
-      );
-    }
-
-    // Validate embedding dimensions
-    const embeddingDim = embeddings[0]?.length;
-    if (!embeddingDim) {
-      throw new Error("خطأ: لم يتم إنشاء embeddings بشكل صحيح");
-    }
-
-    for (let i = 0; i < embeddings.length; i++) {
-      if (embeddings[i].length !== embeddingDim) {
-        throw new Error(
-          `خطأ: embedding ${i} له بعد مختلف (${embeddings[i].length} بدلاً من ${embeddingDim})`
-        );
-      }
-    }
-
-    console.log(
-      `Validated: ${validChunks.length} chunks, ${embeddings.length} embeddings (dim: ${embeddingDim})`
-    );
+    console.log(`Prepared ${validChunks.length} chunks for ChromaDB`);
+    console.log("ChromaDB Cloud will automatically generate embeddings...");
 
     // Prepare metadata
     const uploadedAt = new Date().toISOString();
@@ -122,9 +97,9 @@ export async function uploadFile(file: File): Promise<{
     );
 
     try {
+      // Don't provide embeddings - ChromaDB Cloud will generate them automatically
       await collection.add({
         ids: ids,
-        embeddings: embeddings,
         documents: validChunks,
         metadatas: metadata,
       });

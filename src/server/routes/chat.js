@@ -1,10 +1,4 @@
 import { CloudClient } from "chromadb";
-import { pipeline, env } from "@xenova/transformers";
-
-// Configure transformers
-env.allowLocalModels = false;
-env.remoteURL = "https://huggingface.co";
-env.remotePathTemplate = "{model}/resolve/{revision}/{file}";
 
 const CHROMADB_API_KEY = process.env.CHROMADB_API_KEY || process.env.VITE_CHROMADB_API_KEY || "ck-3EDSUCED38no4aLq8rgMXzTwe14fvnATpGEkwWMgrkEV";
 const CHROMADB_TENANT = process.env.CHROMADB_TENANT || process.env.VITE_CHROMADB_TENANT || "bf8e9ba0-6e6f-4365-a930-2c5ef360f292";
@@ -22,50 +16,17 @@ const chromaClient = new CloudClient({
   database: CHROMADB_DATABASE,
 });
 
-// Initialize embedding model (cached)
-let embeddingModel = null;
+// ChromaDB Cloud will automatically generate embeddings - no local model needed
 
-async function getEmbeddingModel() {
-  if (!embeddingModel) {
-    try {
-      console.log("Loading embedding model (this may take a minute on first run)...");
-      embeddingModel = await pipeline(
-        "feature-extraction",
-        "Xenova/all-MiniLM-L6-v2",
-        {
-          progress_callback: (progress) => {
-            if (progress.status === "downloading") {
-              console.log(`Downloading model: ${progress.progress || 0}%`);
-            }
-          },
-        }
-      );
-      console.log("Embedding model loaded successfully");
-    } catch (error) {
-      console.error("Error loading embedding model:", error);
-      throw new Error(`فشل تحميل نموذج embeddings. تحقق من اتصالك بالإنترنت: ${error instanceof Error ? error.message : "Unknown error"}`);
-    }
-  }
-  return embeddingModel;
-}
-
-async function createEmbedding(text) {
-  const model = await getEmbeddingModel();
-  const output = await model(text, { pooling: "mean", normalize: true });
-  if (!output || !output.data) {
-    throw new Error("Failed to create embedding: no output data");
-  }
-  return Array.from(output.data);
-}
-
-async function searchRelevantDocuments(queryEmbedding, nResults = 5) {
+async function searchRelevantDocuments(queryText, nResults = 5) {
   try {
     const collection = await chromaClient.getCollection({
       name: COLLECTION_NAME,
     });
 
+    // Use queryTexts instead of queryEmbeddings - ChromaDB Cloud will generate embeddings automatically
     const results = await collection.query({
-      queryEmbeddings: [queryEmbedding],
+      queryTexts: [queryText],
       nResults: nResults,
     });
 
@@ -143,10 +104,10 @@ export async function chatHandler(req, res) {
 
     console.log("Processing query:", userQuery);
 
-    const queryEmbedding = await createEmbedding(userQuery);
-    console.log("Query embedding created, length:", queryEmbedding.length);
-
-    const searchResults = await searchRelevantDocuments(queryEmbedding, 5); // Increase to 5 for better context
+    // Search ChromaDB for relevant documents
+    // ChromaDB Cloud will automatically generate embeddings from the query text
+    console.log("Searching ChromaDB (embeddings will be generated automatically)...");
+    const searchResults = await searchRelevantDocuments(userQuery, 5); // Increase to 5 for better context
 
     let context = "";
     if (searchResults && searchResults.documents && searchResults.documents[0]) {

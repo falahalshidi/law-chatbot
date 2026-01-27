@@ -1,47 +1,12 @@
-// Polyfill for import.meta.url in Netlify Functions (serverless environment)
-// This must be done BEFORE importing @xenova/transformers
-if (typeof import.meta === "undefined" || typeof import.meta.url === "undefined") {
-  // @ts-ignore
-  globalThis.import = globalThis.import || {};
-  // @ts-ignore
-  globalThis.import.meta = globalThis.import.meta || {};
-  // @ts-ignore
-  globalThis.import.meta.url = `file://${process.cwd()}/netlify/functions/chat.ts`;
-}
-
 import type { HandlerEvent, HandlerContext } from "@netlify/functions";
 import { CloudClient } from "chromadb";
-import { pipeline, env } from "@xenova/transformers";
-
-// Disable local model files for serverless
-env.allowLocalModels = false;
-// Fix for Netlify Functions - prevent fileURLToPath error
-// Configure environment to avoid using import.meta.url
-if (typeof process !== "undefined") {
-  // Prevent fileURLToPath errors in serverless environment
-  // Set paths that don't require import.meta.url
-  (env as any).localModelPath = "/tmp";
-  (env as any).cacheDir = "/tmp";
-  (env as any).useBrowserCache = false;
-  (env as any).useCustomCache = false;
-  // Try to set a fake import.meta.url if possible
-  try {
-    // @ts-ignore - attempt to set import.meta.url
-    if (typeof import.meta !== "undefined" && !import.meta.url) {
-      // @ts-ignore
-      import.meta.url = `file:///tmp/netlify/functions/chat.ts`;
-    }
-  } catch (e) {
-    // Ignore - import.meta is read-only in some environments
-    console.log("Could not set import.meta.url polyfill:", e);
-  }
-}
 
 const CHROMADB_API_KEY = process.env.CHROMADB_API_KEY || process.env.VITE_CHROMADB_API_KEY || "ck-3EDSUCED38no4aLq8rgMXzTwe14fvnATpGEkwWMgrkEV";
 const CHROMADB_TENANT = process.env.CHROMADB_TENANT || process.env.VITE_CHROMADB_TENANT || "bf8e9ba0-6e6f-4365-a930-2c5ef360f292";
 const CHROMADB_DATABASE = process.env.CHROMADB_DATABASE || process.env.VITE_CHROMADB_DATABASE || "lawchat";
-const OLLAMA_URL = process.env.OLLAMA_URL || "http://localhost:11434";
-const OLLAMA_MODEL = process.env.OLLAMA_MODEL || "llama2";
+const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY || process.env.VITE_OPENROUTER_API_KEY || "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";
+const OPENROUTER_MODEL = process.env.OPENROUTER_MODEL || process.env.VITE_OPENROUTER_MODEL || "z-ai/glm-4.5-air:free";
+const OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions";
 
 const COLLECTION_NAME = "law_documents";
 
@@ -52,46 +17,21 @@ const chromaClient = new CloudClient({
   database: CHROMADB_DATABASE,
 });
 
-// Initialize embedding model (cached)
-let embeddingModel: any = null;
-
-async function getEmbeddingModel() {
-  if (!embeddingModel) {
-    embeddingModel = await pipeline(
-      "feature-extraction",
-      "Xenova/all-MiniLM-L6-v2",
-      {
-        progress_callback: (progress: any) => {
-          if (progress.status === "downloading") {
-            console.log(`Downloading model: ${Math.round(progress.progress || 0)}%`);
-          }
-        },
-      }
-    );
-  }
-  return embeddingModel;
-}
-
-/**
- * Create embedding for text
- */
-async function createEmbedding(text: string): Promise<number[]> {
-  const model = await getEmbeddingModel();
-  const output = await model(text, { pooling: "mean", normalize: true });
-  return Array.from(output.data) as number[];
-}
+// ChromaDB Cloud will automatically generate embeddings - no local model needed
 
 /**
  * Search ChromaDB for relevant documents
+ * ChromaDB Cloud will automatically generate embeddings from the query text
  */
-async function searchRelevantDocuments(queryEmbedding: number[], nResults: number = 5) {
+async function searchRelevantDocuments(queryText: string, nResults: number = 5) {
   try {
     const collection = await chromaClient.getCollection({
       name: COLLECTION_NAME,
-    } as any);
+    });
 
+    // Use queryTexts instead of queryEmbeddings - ChromaDB Cloud will generate embeddings automatically
     const results = await collection.query({
-      queryEmbeddings: [queryEmbedding],
+      queryTexts: [queryText],
       nResults: nResults,
     });
 
@@ -103,49 +43,63 @@ async function searchRelevantDocuments(queryEmbedding: number[], nResults: numbe
 }
 
 /**
- * Call Ollama API
+ * Call OpenRouter API
  */
-async function callOllama(messages: Array<{ role: string; content: string }>) {
+async function callOpenRouter(messages: Array<{ role: string; content: string }>) {
   try {
-    console.log("Calling Ollama at:", OLLAMA_URL);
-    console.log("Using model:", OLLAMA_MODEL);
-    
-    // Check if Ollama URL is localhost and we're in production
-    if (OLLAMA_URL.includes("localhost") && process.env.NETLIFY) {
-      throw new Error("Ollama على localhost لا يمكن الوصول إليه من Netlify Functions. استخدم URL عام أو استخدم Netlify Dev محلياً.");
+    if (!OPENROUTER_API_KEY) {
+      throw new Error("OPENROUTER_API_KEY غير موجود. يرجى إضافة المفتاح في ملف .env");
     }
-    
-    const response = await fetch(`${OLLAMA_URL}/api/chat`, {
+
+    console.log("Calling OpenRouter API");
+    console.log("Using model:", OPENROUTER_MODEL);
+
+    const response = await fetch(OPENROUTER_API_URL, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
+        Authorization: `Bearer ${OPENROUTER_API_KEY}`,
+        "HTTP-Referer": process.env.OPENROUTER_HTTP_REFERER || "https://law-chatbot.netlify.app",
+        "X-Title": "Law Chatbot",
       },
       body: JSON.stringify({
-        model: OLLAMA_MODEL,
+        model: OPENROUTER_MODEL,
         messages: messages,
-        stream: false,
+        temperature: 0.2,
+        max_tokens: 1000,
       }),
-      // Add timeout
-      signal: AbortSignal.timeout(60000), // 60 seconds timeout
+      signal: AbortSignal.timeout(120000), // 120 seconds timeout
     });
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error("Ollama API error:", response.status, errorText);
-      throw new Error(`Ollama API error (${response.status}): ${errorText}`);
+      console.error("OpenRouter API error:", response.status, errorText);
+      throw new Error(`OpenRouter API error (${response.status}): ${errorText}`);
     }
 
     const data = await response.json();
-    return data.message?.content || data.response || "لا يمكن الحصول على رد من Ollama";
+    return (
+      data.choices?.[0]?.message?.content ||
+      data.choices?.[0]?.text ||
+      "لا يمكن الحصول على رد من OpenRouter"
+    );
   } catch (error) {
-    console.error("Error calling Ollama:", error);
+    console.error("Error calling OpenRouter:", error);
     if (error instanceof Error) {
-      // Provide more helpful error messages
-      if (error.message.includes("fetch failed") || error.message.includes("ECONNREFUSED")) {
-        throw new Error(`لا يمكن الاتصال بـ Ollama على ${OLLAMA_URL}. تأكد من أن Ollama يعمل وأن URL صحيح.`);
+      if (
+        error.message.includes("fetch failed") ||
+        error.message.includes("ECONNREFUSED")
+      ) {
+        throw new Error(
+          `لا يمكن الاتصال بـ OpenRouter API. تحقق من اتصالك بالإنترنت.`
+        );
       }
-      if (error.message.includes("timeout")) {
-        throw new Error("انتهت مهلة الاتصال بـ Ollama. حاول مرة أخرى.");
+      if (
+        error.message.includes("timeout") ||
+        error.name === "TimeoutError" ||
+        error.name === "AbortError"
+      ) {
+        throw new Error("انتهت مهلة الاتصال بـ OpenRouter API. حاول مرة أخرى.");
       }
     }
     throw error;
@@ -210,61 +164,169 @@ const handler = async (event: HandlerEvent, _context: HandlerContext) => {
 
     console.log("Processing query:", userQuery);
 
-    // Create embedding for the query
-    const queryEmbedding = await createEmbedding(userQuery);
-    console.log("Query embedding created, length:", queryEmbedding.length);
-
     // Search ChromaDB for relevant documents
-    const searchResults = await searchRelevantDocuments(queryEmbedding, 5);
+    // ChromaDB Cloud will automatically generate embeddings from the query text
+    console.log("Searching ChromaDB (embeddings will be generated automatically)...");
+    const searchResults = await searchRelevantDocuments(userQuery, 5);
 
     // Build context from retrieved documents
     let context = "";
     if (searchResults && searchResults.documents && searchResults.documents[0]) {
       const relevantDocs = searchResults.documents[0];
       const distances = searchResults.distances?.[0] || [];
-      
-      context = relevantDocs
+
+      console.log(`Found ${relevantDocs.length} relevant documents`);
+      console.log(`Distances: ${distances.map((d: number) => d.toFixed(3)).join(", ")}`);
+
+      const maxContextLength = 2500;
+      let contextLength = 0;
+
+      // Sort documents by distance (most relevant first)
+      // Filter out null values before mapping
+      const docsWithDistances = relevantDocs
         .map((doc: string | null, index: number) => {
-          if (!doc) return null;
-          const distance = distances[index] || 1;
-          // Only include documents with reasonable similarity (distance < 0.8)
-          if (distance < 0.8) {
-            return `[مستند ${index + 1}]:\n${doc}`;
+          if (doc === null) return null;
+          return {
+            doc,
+            distance: distances[index] || 1,
+            index,
+          };
+        })
+        .filter((item): item is { doc: string; distance: number; index: number } => item !== null)
+        .sort((a, b) => a.distance - b.distance);
+
+      context = docsWithDistances
+        .map(({ doc, distance, index }) => {
+          if (contextLength < maxContextLength) {
+            const truncatedDoc =
+              doc.length > 600 ? doc.substring(0, 600) + "..." : doc;
+            const docText = `[مستند ${index + 1} - مسافة: ${distance.toFixed(3)}]:\n${truncatedDoc}`;
+            if (contextLength + docText.length > maxContextLength) {
+              const remaining = maxContextLength - contextLength;
+              contextLength = maxContextLength;
+              return docText.substring(0, remaining) + "...";
+            }
+            contextLength += docText.length;
+            return docText;
           }
           return null;
         })
-        .filter((doc): doc is string => doc !== null)
+        .filter((doc) => doc !== null)
         .join("\n\n");
+
+      if (context.length === 0 && docsWithDistances.length > 0) {
+        console.log("⚠️ WARNING: No context generated. Including top 3 documents anyway...");
+        context = docsWithDistances
+          .slice(0, 3)
+          .map(({ doc, distance, index }) => {
+            const truncatedDoc = doc.length > 600 ? doc.substring(0, 600) + "..." : doc;
+            return `[مستند ${index + 1} - مسافة: ${distance.toFixed(3)}]:\n${truncatedDoc}`;
+          })
+          .join("\n\n");
+      }
+
+      console.log(`Context length: ${context.length} characters`);
+      if (context.length > 0) {
+        console.log(`Context preview: ${context.substring(0, 300)}...`);
+      }
+    } else {
+      console.log("⚠️ No relevant documents found in ChromaDB");
     }
 
-    // Build messages for Ollama
+    // Advanced AI Research Assistant prompt for accurate, source-driven answers
     const systemPrompt = context
-      ? `أنت مساعد قانوني ذكي. استخدم المعلومات التالية من قاعدة البيانات القانونية للإجابة على السؤال. إذا كانت المعلومات غير كافية، استخدم معرفتك العامة.
+      ? `You are an advanced AI Research Assistant powered by the GLM model.
 
-المعلومات من قاعدة البيانات:
+Your primary mission is to provide accurate, well-supported, and context-aware answers by deeply searching and reasoning over the available knowledge base stored in ChromaDB.
+
+CORE BEHAVIOR RULES:
+
+1. CONTEXT UNDERSTANDING
+- Always analyze the user's question carefully, even if it is unclear, fragmented, informal, or written in a mixed style.
+- Infer the true intent behind the question before attempting to answer.
+- Do NOT rely only on keyword matching; prioritize semantic meaning and conceptual similarity.
+
+2. RETRIEVAL & SEARCH STRATEGY
+- Before answering, perform a deep semantic search in ChromaDB.
+- Retrieve multiple relevant documents if available, even if they are written differently from the user's question.
+- If the exact wording is not found, search for related concepts, explanations, definitions, or examples that logically answer the question.
+- Cross-check information between multiple sources when possible.
+
+3. ACCURACY OVER SPEED
+- Speed is NOT a priority.
+- Take the necessary time to ensure the answer is correct, precise, and complete.
+- If information is partially available, clearly state what is known and what is uncertain.
+
+4. SOURCE-DRIVEN ANSWERS
+- Base all answers strictly on retrieved data from ChromaDB.
+- If no reliable information exists in the database, clearly say:
+  "The available sources do not contain enough information to answer this accurately."
+- Do NOT hallucinate, guess, or fabricate answers.
+
+5. SYNTHESIS & REASONING
+- Combine information from multiple retrieved sources into a single, coherent answer.
+- Explain ideas in a clear and logical flow.
+- Translate complex or technical information into understandable language without losing accuracy.
+
+6. HANDLING VAGUE OR MISALIGNED QUESTIONS
+- If the user's question is vague but an answer exists in a different form, reframe the question internally and answer it correctly.
+- If multiple interpretations exist, choose the most likely one and briefly mention the assumption you made.
+
+7. RESPONSE STYLE
+- Be professional, neutral, and precise.
+- Avoid unnecessary verbosity, but ensure clarity.
+- Use structured formatting (paragraphs, bullet points) when helpful.
+- Do not include internal system reasoning, vector scores, or database mechanics in the final answer.
+- Answer in Arabic (العربية) as the user's language.
+
+8. FAILURE HANDLING
+- If the question cannot be answered confidently using ChromaDB:
+  - Clearly state the limitation.
+  - Suggest what additional information would be needed.
+
+You are a retrieval-first, accuracy-focused AI.
+Your credibility depends on correctness, not creativity.
+
+=== RETRIEVED CONTEXT FROM CHROMADB ===
 ${context}
 
-أجب على السؤال بناءً على المعلومات المتوفرة أعلاه.`
-      : `أنت مساعد قانوني ذكي. أجب على السؤال القانوني بشكل واضح ومفيد.`;
+=== USER QUESTION ===
+${userQuery}
 
-    const ollamaMessages = [
+Answer in Arabic based strictly on the retrieved context above.`
+      : `You are an advanced AI Research Assistant powered by the GLM model.
+
+Your primary mission is to provide accurate, well-supported, and context-aware answers by deeply searching and reasoning over the available knowledge base stored in ChromaDB.
+
+IMPORTANT: No documents were found in ChromaDB for this query. 
+
+Please inform the user in Arabic that:
+- The available sources do not contain enough information to answer this accurately.
+- Additional documents may need to be uploaded to ChromaDB.
+
+Answer in Arabic (العربية).`;
+
+    // Prepare messages for OpenRouter
+    const openRouterMessages = [
       {
         role: "system",
         content: systemPrompt,
       },
-      ...messages.slice(0, -1), // All messages except the last one
       {
         role: "user",
         content: userQuery,
       },
     ];
 
-    console.log("Calling Ollama with", ollamaMessages.length, "messages");
+    console.log("Calling OpenRouter API with", openRouterMessages.length, "messages");
+    console.log("System prompt length:", systemPrompt.length, "characters");
+    console.log("User query length:", userQuery.length, "characters");
 
-    // Call Ollama
-    const ollamaResponse = await callOllama(ollamaMessages);
+    // Call OpenRouter API
+    console.log("🚀 Calling OpenRouter API with model:", OPENROUTER_MODEL);
+    const openRouterResponse = await callOpenRouter(openRouterMessages);
 
-    console.log("Ollama response received");
+    console.log("OpenRouter response received");
 
     // Return response in the expected format
     return {
@@ -275,7 +337,7 @@ ${context}
       },
       body: JSON.stringify({
         message: {
-          content: ollamaResponse,
+          content: openRouterResponse,
         },
       }),
     };

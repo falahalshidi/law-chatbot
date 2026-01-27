@@ -1,43 +1,7 @@
-// Polyfill for import.meta.url in Netlify Functions (serverless environment)
-// This must be done BEFORE importing @xenova/transformers
-if (typeof import.meta === "undefined" || typeof import.meta.url === "undefined") {
-  // @ts-ignore
-  globalThis.import = globalThis.import || {};
-  // @ts-ignore
-  globalThis.import.meta = globalThis.import.meta || {};
-  // @ts-ignore
-  globalThis.import.meta.url = `file://${process.cwd()}/netlify/functions/upload-file.ts`;
-}
-
 import type { HandlerEvent, HandlerContext } from "@netlify/functions";
 import { CloudClient } from "chromadb";
 import pdfParse from "pdf-parse";
 import mammoth from "mammoth";
-import { pipeline, env } from "@xenova/transformers";
-
-// Disable local model files for serverless
-env.allowLocalModels = false;
-// Fix for Netlify Functions - prevent fileURLToPath error
-// Configure environment to avoid using import.meta.url
-if (typeof process !== "undefined") {
-  // Prevent fileURLToPath errors in serverless environment
-  // Set paths that don't require import.meta.url
-  (env as any).localModelPath = "/tmp";
-  (env as any).cacheDir = "/tmp";
-  (env as any).useBrowserCache = false;
-  (env as any).useCustomCache = false;
-  // Try to set a fake import.meta.url if possible
-  try {
-    // @ts-ignore - attempt to set import.meta.url
-    if (typeof import.meta !== "undefined" && !import.meta.url) {
-      // @ts-ignore
-      import.meta.url = `file:///tmp/netlify/functions/upload-file.ts`;
-    }
-  } catch (e) {
-    // Ignore - import.meta is read-only in some environments
-    console.log("Could not set import.meta.url polyfill:", e);
-  }
-}
 
 const CHROMADB_API_KEY = process.env.CHROMADB_API_KEY || process.env.VITE_CHROMADB_API_KEY || "ck-3EDSUCED38no4aLq8rgMXzTwe14fvnATpGEkwWMgrkEV";
 const CHROMADB_TENANT = process.env.CHROMADB_TENANT || process.env.VITE_CHROMADB_TENANT || "bf8e9ba0-6e6f-4365-a930-2c5ef360f292";
@@ -52,25 +16,7 @@ const chromaClient = new CloudClient({
   database: CHROMADB_DATABASE,
 });
 
-// Initialize embedding model (cached)
-let embeddingModel: any = null;
-
-async function getEmbeddingModel() {
-  if (!embeddingModel) {
-    embeddingModel = await pipeline(
-      "feature-extraction",
-      "Xenova/all-MiniLM-L6-v2",
-      {
-        progress_callback: (progress: any) => {
-          if (progress.status === "downloading") {
-            console.log(`Downloading model: ${Math.round(progress.progress || 0)}%`);
-          }
-        },
-      }
-    );
-  }
-  return embeddingModel;
-}
+// ChromaDB Cloud will automatically generate embeddings - no local model needed
 
 /**
  * Extract text from PDF buffer
@@ -120,34 +66,22 @@ function splitTextIntoChunks(text: string, chunkSize: number = 1000, overlap: nu
   return chunks.filter(chunk => chunk.length > 0);
 }
 
-/**
- * Create embeddings for text chunks
- */
-async function createEmbeddings(chunks: string[]): Promise<number[][]> {
-  const model = await getEmbeddingModel();
-  const embeddings: number[][] = [];
-
-  for (const chunk of chunks) {
-    const output = await model(chunk, { pooling: "mean", normalize: true });
-    const embedding = Array.from(output.data) as number[];
-    embeddings.push(embedding);
-  }
-
-  return embeddings;
-}
+// ChromaDB Cloud will automatically generate embeddings from documents
 
 /**
  * Get or create collection
+ * ChromaDB Cloud will automatically generate embeddings
  */
 async function getCollection() {
   try {
     const collection = await chromaClient.getCollection({
       name: COLLECTION_NAME,
-    } as any);
+    });
     return collection;
   } catch (error) {
     console.log("Collection not found, creating new one...");
     try {
+      // ChromaDB Cloud will use default embedding function automatically
       const collection = await chromaClient.createCollection({
         name: COLLECTION_NAME,
       });
@@ -355,11 +289,7 @@ const handler = async (event: HandlerEvent, _context: HandlerContext) => {
     const chunks = splitTextIntoChunks(text, 1000, 200);
 
     console.log(`Processing ${chunks.length} chunks for file: ${filename}`);
-
-    // Create embeddings
-    console.log("Creating embeddings...");
-    const embeddings = await createEmbeddings(chunks);
-    console.log(`Created ${embeddings.length} embeddings`);
+    console.log("ChromaDB Cloud will automatically generate embeddings...");
 
     // Prepare metadata
     const uploadedAt = new Date().toISOString();
@@ -378,9 +308,9 @@ const handler = async (event: HandlerEvent, _context: HandlerContext) => {
     const ids = metadata.map((_, index) => `${filename}_chunk_${index}_${Date.now()}`);
 
     try {
+      // Don't provide embeddings - ChromaDB Cloud will generate them automatically
       await collection.add({
         ids: ids,
-        embeddings: embeddings,
         documents: chunks,
         metadatas: metadata,
       });

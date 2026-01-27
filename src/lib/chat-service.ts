@@ -1,6 +1,5 @@
 import { OPENROUTER_API_KEY, OPENROUTER_MODEL } from "./env";
 import { chromaClient } from "./chromadb";
-import { createEmbedding } from "./embeddings";
 
 const OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions";
 
@@ -8,18 +7,20 @@ const COLLECTION_NAME = "law_documents";
 
 /**
  * Search for relevant documents in ChromaDB
+ * ChromaDB Cloud will automatically generate embeddings from the query text
  */
 async function searchRelevantDocuments(
-  queryEmbedding: number[],
+  queryText: string,
   nResults: number = 5
 ) {
   try {
     const collection = await chromaClient.getCollection({
       name: COLLECTION_NAME,
-    } as any);
+    });
 
+    // Use queryTexts instead of queryEmbeddings - ChromaDB Cloud will generate embeddings automatically
     const results = await collection.query({
-      queryEmbeddings: [queryEmbedding],
+      queryTexts: [queryText],
       nResults: nResults,
     });
 
@@ -108,12 +109,10 @@ export async function sendChatMessage(
 
     console.log("Processing query:", userQuery);
 
-    // Create embedding for the query
-    const queryEmbedding = await createEmbedding(userQuery);
-    console.log("Query embedding created, length:", queryEmbedding.length);
-
     // Search ChromaDB for relevant documents
-    const searchResults = await searchRelevantDocuments(queryEmbedding, 5);
+    // ChromaDB Cloud will automatically generate embeddings from the query text
+    console.log("Searching ChromaDB (embeddings will be generated automatically)...");
+    const searchResults = await searchRelevantDocuments(userQuery, 5);
 
     // Build context from retrieved documents
     let context = "";

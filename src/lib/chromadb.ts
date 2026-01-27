@@ -13,17 +13,17 @@ const COLLECTION_NAME = "law_documents";
 
 /**
  * Get or create the documents collection
+ * ChromaDB Cloud will automatically generate embeddings
  */
 export async function getCollection() {
   try {
-    // Type assertion needed because CloudClient's getCollection may not require embeddingFunction
-    // when the collection already exists and was created with embeddings
     const collection = await chromaClient.getCollection({
       name: COLLECTION_NAME,
-    } as any);
+    });
     return collection;
   } catch (error) {
     // Collection doesn't exist, create it
+    // ChromaDB Cloud will use default embedding function automatically
     const collection = await chromaClient.createCollection({
       name: COLLECTION_NAME,
     });
@@ -33,10 +33,10 @@ export async function getCollection() {
 
 /**
  * Store document chunks in ChromaDB
+ * ChromaDB Cloud will automatically generate embeddings from the documents
  */
 export async function storeDocumentChunks(
   chunks: string[],
-  embeddings: number[][],
   metadata: {
     filename: string;
     fileType: string;
@@ -48,9 +48,9 @@ export async function storeDocumentChunks(
   
   const ids = metadata.map((meta, index) => `${meta.filename}_chunk_${index}`);
   
+  // Don't provide embeddings - ChromaDB Cloud will generate them automatically
   await collection.add({
     ids: ids,
-    embeddings: embeddings,
     documents: chunks,
     metadatas: metadata,
   });
@@ -60,15 +60,17 @@ export async function storeDocumentChunks(
 
 /**
  * Search for relevant documents in ChromaDB
+ * ChromaDB Cloud will automatically generate embeddings from the query text
  */
 export async function searchDocuments(
-  queryEmbedding: number[],
+  queryText: string,
   nResults: number = 5
 ) {
   const collection = await getCollection();
   
+  // Use queryTexts instead of queryEmbeddings - ChromaDB Cloud will generate embeddings automatically
   const results = await collection.query({
-    queryEmbeddings: [queryEmbedding],
+    queryTexts: [queryText],
     nResults: nResults,
   });
   
