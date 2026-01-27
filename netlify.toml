@@ -6,7 +6,6 @@
 [functions]
   node_bundler = "esbuild"
   external_node_modules = ["cohere-ai", "ollama"]
-  included_files = ["netlify/functions/**"]
 
 [build.environment]
   # ChromaDB Configuration
