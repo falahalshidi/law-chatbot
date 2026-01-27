@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { useNavigate } from "react-router-dom";
 import { supabase, type User } from "@/lib/supabase";
 import { Upload, FileText, X, Trash2 } from "lucide-react";
+import { listFiles, uploadFile, deleteFile } from "@/lib/file-upload-service";
 
 interface UploadedFile {
   filename: string;
@@ -107,18 +108,11 @@ export default function AdminPage() {
 
   const loadFiles = async () => {
     try {
-      const endpoint = "/api/upload-file";
-
-      const response = await fetch(endpoint, {
-        method: "GET",
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        setFiles(data.files || []);
-      }
+      const files = await listFiles();
+      setFiles(files);
     } catch (err) {
       console.error("Error loading files:", err);
+      setError("حدث خطأ أثناء تحميل الملفات");
     }
   };
 
@@ -131,64 +125,16 @@ export default function AdminPage() {
     setUploading(true);
 
     try {
-      // Convert file to base64
-      const fileBuffer = await selectedFile.arrayBuffer();
-      const base64 = btoa(
-        new Uint8Array(fileBuffer).reduce(
-          (data, byte) => data + String.fromCharCode(byte),
-          ""
-        )
-      );
-
-      const endpoint = "/api/upload-file";
-
-      const response = await fetch(endpoint, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          file: base64,
-          filename: filename,
-          fileType: selectedFile.type,
-        }),
-      });
-
-      if (response.ok) {
-        await response.json(); // Response consumed but data not needed
-        setUploadStatus({ ...uploadStatus, [filename]: "success" });
-        await loadFiles();
-        setTimeout(() => {
-          setUploadStatus((prev) => {
-            const newStatus = { ...prev };
-            delete newStatus[filename];
-            return newStatus;
-          });
-        }, 3000);
-      } else {
-        let errorMessage = "فشل رفع الملف";
-        try {
-          // Read response body once
-          const contentType = response.headers.get("content-type");
-          let errorData: any;
-          
-          if (contentType?.includes("application/json")) {
-            errorData = await response.json();
-            errorMessage = errorData.error || errorData.message || errorMessage;
-            if (errorData.details) {
-              console.error("Error details:", errorData.details);
-            }
-          } else {
-            const errorText = await response.text();
-            errorMessage = errorText || errorMessage;
-          }
-        } catch (parseError) {
-          errorMessage = `خطأ ${response.status}: ${response.statusText}`;
-          console.error("Error parsing response:", parseError);
-        }
-        setUploadStatus({ ...uploadStatus, [filename]: "error" });
-        setError(errorMessage);
-      }
+      await uploadFile(selectedFile);
+      setUploadStatus({ ...uploadStatus, [filename]: "success" });
+      await loadFiles();
+      setTimeout(() => {
+        setUploadStatus((prev) => {
+          const newStatus = { ...prev };
+          delete newStatus[filename];
+          return newStatus;
+        });
+      }, 3000);
     } catch (err) {
       setUploadStatus({ ...uploadStatus, [filename]: "error" });
       const errorMessage = err instanceof Error ? err.message : "حدث خطأ أثناء رفع الملف";
@@ -208,35 +154,11 @@ export default function AdminPage() {
     }
 
     try {
-      const endpoint = "/api/upload-file";
-
-      const response = await fetch(endpoint, {
-        method: "DELETE",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ filename }),
-      });
-
-      if (response.ok) {
-        await loadFiles();
-      } else {
-        let errorMessage = "فشل حذف الملف";
-        try {
-          const errorData = await response.json();
-          errorMessage = errorData.error || errorData.message || errorMessage;
-        } catch (parseError) {
-          try {
-            const errorText = await response.text();
-            errorMessage = errorText || errorMessage;
-          } catch (textError) {
-            errorMessage = `خطأ ${response.status}: ${response.statusText}`;
-          }
-        }
-        setError(errorMessage);
-      }
+      await deleteFile(filename);
+      await loadFiles();
     } catch (err) {
-      setError("حدث خطأ أثناء حذف الملف");
+      const errorMessage = err instanceof Error ? err.message : "حدث خطأ أثناء حذف الملف";
+      setError(errorMessage);
       console.error(err);
     }
   };
@@ -257,67 +179,20 @@ export default function AdminPage() {
       setUploading(true);
 
       try {
-        // Convert file to base64
-        const fileBuffer = await droppedFile.arrayBuffer();
-        const base64 = btoa(
-          new Uint8Array(fileBuffer).reduce(
-            (data, byte) => data + String.fromCharCode(byte),
-            ""
-          )
-        );
-
-        const endpoint = "/api/upload-file";
-
-        const response = await fetch(endpoint, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            file: base64,
-            filename: filename,
-            fileType: droppedFile.type,
-          }),
-        });
-
-        if (response.ok) {
-          await response.json(); // Response consumed but data not needed
-          setUploadStatus({ ...uploadStatus, [filename]: "success" });
-          await loadFiles();
-          setTimeout(() => {
-            setUploadStatus((prev) => {
-              const newStatus = { ...prev };
-              delete newStatus[filename];
-              return newStatus;
-            });
-          }, 3000);
-        } else {
-          let errorMessage = "فشل رفع الملف";
-          try {
-            // Read response body once
-            const contentType = response.headers.get("content-type");
-            let errorData: any;
-            
-            if (contentType?.includes("application/json")) {
-              errorData = await response.json();
-              errorMessage = errorData.error || errorData.message || errorMessage;
-              if (errorData.details) {
-                console.error("Error details:", errorData.details);
-              }
-            } else {
-              const errorText = await response.text();
-              errorMessage = errorText || errorMessage;
-            }
-          } catch (parseError) {
-            errorMessage = `خطأ ${response.status}: ${response.statusText}`;
-            console.error("Error parsing response:", parseError);
-          }
-          setUploadStatus({ ...uploadStatus, [filename]: "error" });
-          setError(errorMessage);
-        }
+        await uploadFile(droppedFile);
+        setUploadStatus({ ...uploadStatus, [filename]: "success" });
+        await loadFiles();
+        setTimeout(() => {
+          setUploadStatus((prev) => {
+            const newStatus = { ...prev };
+            delete newStatus[filename];
+            return newStatus;
+          });
+        }, 3000);
       } catch (err) {
         setUploadStatus({ ...uploadStatus, [filename]: "error" });
-        setError("حدث خطأ أثناء رفع الملف");
+        const errorMessage = err instanceof Error ? err.message : "حدث خطأ أثناء رفع الملف";
+        setError(errorMessage);
         console.error(err);
       } finally {
         setUploading(false);
