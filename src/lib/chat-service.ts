@@ -1,28 +1,23 @@
-import { CloudClient } from "chromadb";
+import { OPENROUTER_API_KEY, OPENROUTER_MODEL } from "./env";
+import { chromaClient } from "./chromadb";
 
-const CHROMADB_API_KEY = process.env.CHROMADB_API_KEY || process.env.VITE_CHROMADB_API_KEY || "ck-3EDSUCED38no4aLq8rgMXzTwe14fvnATpGEkwWMgrkEV";
-const CHROMADB_TENANT = process.env.CHROMADB_TENANT || process.env.VITE_CHROMADB_TENANT || "bf8e9ba0-6e6f-4365-a930-2c5ef360f292";
-const CHROMADB_DATABASE = process.env.CHROMADB_DATABASE || process.env.VITE_CHROMADB_DATABASE || "lawchat";
-const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY || process.env.VITE_OPENROUTER_API_KEY || "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";
-const OPENROUTER_MODEL = process.env.OPENROUTER_MODEL || process.env.VITE_OPENROUTER_MODEL || "z-ai/glm-4.5-air:free";
 const OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions";
 
 const COLLECTION_NAME = "law_documents";
 
-// Initialize ChromaDB client
-const chromaClient = new CloudClient({
-  apiKey: CHROMADB_API_KEY,
-  tenant: CHROMADB_TENANT,
-  database: CHROMADB_DATABASE,
-});
-
-// ChromaDB Cloud will automatically generate embeddings - no local model needed
-
-async function searchRelevantDocuments(queryText, nResults = 5) {
+/**
+ * Search for relevant documents in ChromaDB
+ * ChromaDB Cloud will automatically generate embeddings from the query text
+ */
+async function searchRelevantDocuments(
+  queryText: string,
+  nResults: number = 5
+) {
   try {
+    // Type assertion needed because ChromaDB Cloud uses default embedding function
     const collection = await chromaClient.getCollection({
       name: COLLECTION_NAME,
-    });
+    } as any);
 
     // Use queryTexts instead of queryEmbeddings - ChromaDB Cloud will generate embeddings automatically
     const results = await collection.query({
@@ -37,8 +32,10 @@ async function searchRelevantDocuments(queryText, nResults = 5) {
   }
 }
 
-// OpenRouter API call function
-async function callOpenRouter(messages) {
+/**
+ * Call OpenRouter API
+ */
+async function callOpenRouter(messages: Array<{ role: string; content: string }>) {
   try {
     if (!OPENROUTER_API_KEY) {
       throw new Error("OPENROUTER_API_KEY غير موجود. يرجى إضافة المفتاح في ملف .env");
@@ -51,8 +48,8 @@ async function callOpenRouter(messages) {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "Authorization": `Bearer ${OPENROUTER_API_KEY}`,
-        "HTTP-Referer": process.env.OPENROUTER_HTTP_REFERER || "http://localhost:3001",
+        Authorization: `Bearer ${OPENROUTER_API_KEY}`,
+        "HTTP-Referer": window.location.origin,
         "X-Title": "Law Chatbot",
       },
       body: JSON.stringify({
@@ -71,14 +68,27 @@ async function callOpenRouter(messages) {
     }
 
     const data = await response.json();
-    return data.choices?.[0]?.message?.content || data.choices?.[0]?.text || "لا يمكن الحصول على رد من OpenRouter";
+    return (
+      data.choices?.[0]?.message?.content ||
+      data.choices?.[0]?.text ||
+      "لا يمكن الحصول على رد من OpenRouter"
+    );
   } catch (error) {
     console.error("Error calling OpenRouter:", error);
     if (error instanceof Error) {
-      if (error.message.includes("fetch failed") || error.message.includes("ECONNREFUSED")) {
-        throw new Error(`لا يمكن الاتصال بـ OpenRouter API. تحقق من اتصالك بالإنترنت.`);
+      if (
+        error.message.includes("fetch failed") ||
+        error.message.includes("ECONNREFUSED")
+      ) {
+        throw new Error(
+          `لا يمكن الاتصال بـ OpenRouter API. تحقق من اتصالك بالإنترنت.`
+        );
       }
-      if (error.message.includes("timeout") || error.name === "TimeoutError" || error.name === "AbortError") {
+      if (
+        error.message.includes("timeout") ||
+        error.name === "TimeoutError" ||
+        error.name === "AbortError"
+      ) {
         throw new Error("انتهت مهلة الاتصال بـ OpenRouter API. حاول مرة أخرى.");
       }
     }
@@ -86,20 +96,16 @@ async function callOpenRouter(messages) {
   }
 }
 
-
-export async function chatHandler(req, res) {
+/**
+ * Send a chat message and get response
+ */
+export async function sendChatMessage(
+  userQuery: string,
+  _conversationHistory: Array<{ role: string; content: string }> = []
+): Promise<string> {
   try {
-    const { messages: requestMessages } = req.body;
-    
-    if (!requestMessages || requestMessages.length === 0) {
-      return res.status(400).json({ error: "No messages provided" });
-    }
-
-    const lastMessage = requestMessages[requestMessages.length - 1];
-    const userQuery = lastMessage.content || "";
-
     if (!userQuery.trim()) {
-      return res.status(400).json({ error: "Empty query" });
+      throw new Error("الرسالة فارغة");
     }
 
     console.log("Processing query:", userQuery);
@@ -107,37 +113,41 @@ export async function chatHandler(req, res) {
     // Search ChromaDB for relevant documents
     // ChromaDB Cloud will automatically generate embeddings from the query text
     console.log("Searching ChromaDB (embeddings will be generated automatically)...");
-    const searchResults = await searchRelevantDocuments(userQuery, 5); // Increase to 5 for better context
+    const searchResults = await searchRelevantDocuments(userQuery, 5);
 
+    // Build context from retrieved documents
     let context = "";
     if (searchResults && searchResults.documents && searchResults.documents[0]) {
       const relevantDocs = searchResults.documents[0];
       const distances = searchResults.distances?.[0] || [];
-      
+
       console.log(`Found ${relevantDocs.length} relevant documents`);
-      console.log(`Distances: ${distances.map(d => d.toFixed(3)).join(', ')}`);
-      
-      // Increase context length for better answers
-      const maxContextLength = 2500; // Increase to 2500 chars for better context
+      console.log(`Distances: ${distances.map((d: number) => d.toFixed(3)).join(", ")}`);
+
+      const maxContextLength = 2500;
       let contextLength = 0;
-      
+
       // Sort documents by distance (most relevant first)
-      const docsWithDistances = relevantDocs.map((doc, index) => ({
-        doc,
-        distance: distances[index] || 1,
-        index
-      })).sort((a, b) => a.distance - b.distance);
-      
+      // Filter out null values before mapping
+      const docsWithDistances = relevantDocs
+        .map((doc: string | null, index: number) => {
+          if (doc === null) return null;
+          return {
+            doc,
+            distance: distances[index] || 1,
+            index,
+          };
+        })
+        .filter((item): item is { doc: string; distance: number; index: number } => item !== null)
+        .sort((a, b) => a.distance - b.distance);
+
       context = docsWithDistances
         .map(({ doc, distance, index }) => {
-          // Very lenient distance threshold - include all documents (distance can be > 1.0)
-          // Lower distance = more relevant, but we'll include all found documents
           if (contextLength < maxContextLength) {
-            // Increase document size to 600 chars for better context
-            const truncatedDoc = doc.length > 600 ? doc.substring(0, 600) + "..." : doc;
+            const truncatedDoc =
+              doc.length > 600 ? doc.substring(0, 600) + "..." : doc;
             const docText = `[مستند ${index + 1} - مسافة: ${distance.toFixed(3)}]:\n${truncatedDoc}`;
             if (contextLength + docText.length > maxContextLength) {
-              // Truncate if needed
               const remaining = maxContextLength - contextLength;
               contextLength = maxContextLength;
               return docText.substring(0, remaining) + "...";
@@ -149,10 +159,9 @@ export async function chatHandler(req, res) {
         })
         .filter((doc) => doc !== null)
         .join("\n\n");
-      
+
       if (context.length === 0 && docsWithDistances.length > 0) {
         console.log("⚠️ WARNING: No context generated. Including top 3 documents anyway...");
-        // Include top 3 documents if no context was generated
         context = docsWithDistances
           .slice(0, 3)
           .map(({ doc, distance, index }) => {
@@ -161,7 +170,7 @@ export async function chatHandler(req, res) {
           })
           .join("\n\n");
       }
-      
+
       console.log(`Context length: ${context.length} characters`);
       if (context.length > 0) {
         console.log(`Context preview: ${context.substring(0, 300)}...`);
@@ -170,7 +179,7 @@ export async function chatHandler(req, res) {
       console.log("⚠️ No relevant documents found in ChromaDB");
     }
 
-    // Advanced AI Research Assistant prompt for accurate, source-driven answers
+    // Build system prompt
     const systemPrompt = context
       ? `You are an advanced AI Research Assistant powered by the GLM model.
 
@@ -243,8 +252,7 @@ Please inform the user in Arabic that:
 
 Answer in Arabic (العربية).`;
 
-    // Simplify messages - only send system prompt and current query
-    // Don't send conversation history to avoid confusion
+    // Prepare messages for OpenRouter
     const openRouterMessages = [
       {
         role: "system",
@@ -260,22 +268,15 @@ Answer in Arabic (العربية).`;
     console.log("System prompt length:", systemPrompt.length, "characters");
     console.log("User query length:", userQuery.length, "characters");
 
-    // Call OpenRouter API - ONLY OpenRouter, NO Ollama
+    // Call OpenRouter API
     console.log("🚀 Calling OpenRouter API with model:", OPENROUTER_MODEL);
     const openRouterResponse = await callOpenRouter(openRouterMessages);
 
     console.log("OpenRouter response received");
 
-    res.json({
-      message: {
-        content: openRouterResponse,
-      },
-    });
+    return openRouterResponse;
   } catch (error) {
-    console.error("Function error:", error);
-    res.status(500).json({
-      error: error instanceof Error ? error.message : "Internal server error",
-    });
+    console.error("Error in sendChatMessage:", error);
+    throw error;
   }
 }
-

@@ -1,14 +1,6 @@
 import { CloudClient } from "chromadb";
 import pdfParse from "pdf-parse";
 import mammoth from "mammoth";
-import { pipeline, env } from "@xenova/transformers";
-
-// Configure transformers
-env.allowLocalModels = false;
-env.remoteURL = "https://huggingface.co";
-env.remotePathTemplate = "{model}/resolve/{revision}/{file}";
-// Increase timeout for model downloads
-env.backends.onnx.wasm.proxy = false;
 
 const CHROMADB_API_KEY = process.env.CHROMADB_API_KEY || process.env.VITE_CHROMADB_API_KEY || "ck-3EDSUCED38no4aLq8rgMXzTwe14fvnATpGEkwWMgrkEV";
 const CHROMADB_TENANT = process.env.CHROMADB_TENANT || process.env.VITE_CHROMADB_TENANT || "bf8e9ba0-6e6f-4365-a930-2c5ef360f292";
@@ -22,55 +14,7 @@ const chromaClient = new CloudClient({
   database: CHROMADB_DATABASE,
 });
 
-let embeddingModel = null;
-
-async function getEmbeddingModel() {
-  if (!embeddingModel) {
-    try {
-      console.log("⏳ Loading embedding model (this may take 1-2 minutes on first run)...");
-      console.log("💡 Tip: Model will be cached after first download");
-      
-      // Retry logic for network issues
-      let retries = 3;
-      let lastError = null;
-      
-      while (retries > 0) {
-        try {
-          embeddingModel = await pipeline(
-            "feature-extraction",
-            "Xenova/all-MiniLM-L6-v2",
-            {
-              progress_callback: (progress) => {
-                if (progress.status === "downloading") {
-                  console.log(`📥 Downloading model: ${Math.round(progress.progress || 0)}%`);
-                } else if (progress.status === "loading") {
-                  console.log(`⚙️ Loading model...`);
-                }
-              },
-            }
-          );
-          console.log("✅ Embedding model loaded successfully");
-          break; // Success, exit retry loop
-        } catch (error) {
-          lastError = error;
-          retries--;
-          if (retries > 0) {
-            console.log(`⚠️ Retry loading model (${4 - retries}/3)...`);
-            await new Promise(resolve => setTimeout(resolve, 3000)); // Wait 3 seconds before retry
-          }
-        }
-      }
-      
-      if (!embeddingModel) {
-        throw lastError || new Error("Failed to load model after retries");
-      }
-    } catch (error) {
-      console.error("❌ Error loading embedding model:", error);
-      throw new Error(`فشل تحميل نموذج embeddings. تحقق من اتصالك بالإنترنت وحاول مرة أخرى: ${error instanceof Error ? error.message : "Unknown error"}`);
-    }
-  }
-  return embeddingModel;
-}
+// ChromaDB Cloud will automatically generate embeddings - no local model needed
 
 async function extractTextFromPDF(buffer) {
   try {
@@ -174,41 +118,7 @@ function splitTextIntoChunks(text, chunkSize = 1000, overlap = 200) {
   }
 }
 
-async function createEmbeddings(chunks) {
-  const model = await getEmbeddingModel();
-  const embeddings = [];
-
-  for (let i = 0; i < chunks.length; i++) {
-    const chunk = chunks[i];
-    if (!chunk || chunk.trim().length === 0) {
-      console.warn(`Skipping empty chunk at index ${i}`);
-      continue;
-    }
-
-    try {
-      const output = await model(chunk, { pooling: "mean", normalize: true });
-      if (!output || !output.data) {
-        throw new Error(`No output data from model for chunk ${i}`);
-      }
-      
-      const embedding = Array.from(output.data);
-      if (!embedding || embedding.length === 0) {
-        throw new Error(`Empty embedding for chunk ${i}`);
-      }
-      
-      embeddings.push(embedding);
-    } catch (error) {
-      console.error(`Error creating embedding for chunk ${i}:`, error);
-      throw new Error(`فشل إنشاء embedding للجزء ${i + 1}: ${error instanceof Error ? error.message : "Unknown error"}`);
-    }
-  }
-
-  if (embeddings.length === 0) {
-    throw new Error("لم يتم إنشاء أي embeddings");
-  }
-
-  return embeddings;
-}
+// ChromaDB Cloud will automatically generate embeddings from documents
 
 async function getCollection() {
   try {
@@ -219,6 +129,7 @@ async function getCollection() {
   } catch (error) {
     console.log("Collection not found, creating new one...");
     try {
+      // ChromaDB Cloud will use default embedding function automatically
       const collection = await chromaClient.createCollection({
         name: COLLECTION_NAME,
       });
@@ -352,9 +263,8 @@ export async function uploadFileHandler(req, res) {
       console.log(`Filtered ${chunks.length - validChunks.length} empty chunks`);
     }
 
-    console.log("Creating embeddings...");
-    const embeddings = await createEmbeddings(validChunks);
-    console.log(`Created ${embeddings.length} embeddings`);
+    console.log(`Prepared ${validChunks.length} chunks for ChromaDB`);
+    console.log("ChromaDB Cloud will automatically generate embeddings...");
 
     const uploadedAt = new Date().toISOString();
     const metadata = validChunks.map((_, index) => ({
@@ -363,30 +273,6 @@ export async function uploadFileHandler(req, res) {
       uploadedAt,
       chunkIndex: index,
     }));
-
-    // Validate arrays have same length
-    if (validChunks.length !== embeddings.length || validChunks.length !== metadata.length) {
-      console.error("Array length mismatch:", {
-        chunks: validChunks.length,
-        embeddings: embeddings.length,
-        metadata: metadata.length,
-      });
-      throw new Error(`خطأ في معالجة الملف: أطوال المصفوفات غير متطابقة (chunks: ${validChunks.length}, embeddings: ${embeddings.length}, metadata: ${metadata.length})`);
-    }
-
-    // Validate embedding dimensions
-    const embeddingDim = embeddings[0]?.length;
-    if (!embeddingDim) {
-      throw new Error("خطأ: لم يتم إنشاء embeddings بشكل صحيح");
-    }
-    
-    for (let i = 0; i < embeddings.length; i++) {
-      if (embeddings[i].length !== embeddingDim) {
-        throw new Error(`خطأ: embedding ${i} له بعد مختلف (${embeddings[i].length} بدلاً من ${embeddingDim})`);
-      }
-    }
-
-    console.log(`Validated: ${validChunks.length} chunks, ${embeddings.length} embeddings (dim: ${embeddingDim}), ${metadata.length} metadata entries`);
 
     console.log("Connecting to ChromaDB...");
     const collection = await getCollection();
@@ -397,31 +283,22 @@ export async function uploadFileHandler(req, res) {
     const randomSuffix = Math.random().toString(36).substring(2, 9);
     const ids = validChunks.map((_, index) => `${filename}_chunk_${index}_${timestamp}_${randomSuffix}`);
 
-    // Ensure all arrays are the same length (should already be equal after validation)
-    const minLength = Math.min(ids.length, embeddings.length, validChunks.length, metadata.length);
-    const finalIds = ids.slice(0, minLength);
-    const finalEmbeddings = embeddings.slice(0, minLength);
-    const finalChunks = validChunks.slice(0, minLength);
-    const finalMetadata = metadata.slice(0, minLength);
-
-    console.log(`Adding ${minLength} items to ChromaDB...`);
+    console.log(`Adding ${validChunks.length} items to ChromaDB...`);
 
     try {
+      // Don't provide embeddings - ChromaDB Cloud will generate them automatically
       await collection.add({
-        ids: finalIds,
-        embeddings: finalEmbeddings,
-        documents: finalChunks,
-        metadatas: finalMetadata,
+        ids: ids,
+        documents: validChunks,
+        metadatas: metadata,
       });
       console.log("Documents added successfully to ChromaDB");
     } catch (chromaError) {
       console.error("ChromaDB error:", chromaError);
       console.error("Error details:", {
-        idsCount: finalIds.length,
-        embeddingsCount: finalEmbeddings.length,
-        documentsCount: finalChunks.length,
-        metadatasCount: finalMetadata.length,
-        embeddingDim: finalEmbeddings[0]?.length,
+        idsCount: ids.length,
+        documentsCount: validChunks.length,
+        metadatasCount: metadata.length,
       });
       throw new Error(`فشل حفظ الملف في ChromaDB: ${chromaError instanceof Error ? chromaError.message : "Unknown error"}`);
     }
@@ -429,7 +306,7 @@ export async function uploadFileHandler(req, res) {
     return res.json({
       success: true,
       filename,
-      chunksCount: minLength,
+      chunksCount: validChunks.length,
       message: "File uploaded and processed successfully",
     });
   } catch (error) {
