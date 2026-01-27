@@ -5,7 +5,7 @@
 
 [functions]
   node_bundler = "esbuild"
-  external_node_modules = ["cohere-ai"]
+  external_node_modules = ["cohere-ai", "ollama"]
 
 [build.environment]
   # ChromaDB Configuration - Set these in Netlify Dashboard > Site settings > Environment variables

@@ -1,41 +1,8 @@
-// Polyfill for import.meta.url in Netlify Functions (serverless environment)
-// This must be done BEFORE importing @xenova/transformers
-if (typeof import.meta === "undefined" || typeof import.meta.url === "undefined") {
-  // @ts-ignore
-  globalThis.import = globalThis.import || {};
-  // @ts-ignore
-  globalThis.import.meta = globalThis.import.meta || {};
-  // @ts-ignore
-  globalThis.import.meta.url = `file://${process.cwd()}/netlify/functions/chat.ts`;
-}
-
 import type { HandlerEvent, HandlerContext } from "@netlify/functions";
 import { CloudClient } from "chromadb";
-import { pipeline, env } from "@xenova/transformers";
 
-// Disable local model files for serverless
-env.allowLocalModels = false;
-// Fix for Netlify Functions - prevent fileURLToPath error
-// Configure environment to avoid using import.meta.url
-if (typeof process !== "undefined") {
-  // Prevent fileURLToPath errors in serverless environment
-  // Set paths that don't require import.meta.url
-  (env as any).localModelPath = "/tmp";
-  (env as any).cacheDir = "/tmp";
-  (env as any).useBrowserCache = false;
-  (env as any).useCustomCache = false;
-  // Try to set a fake import.meta.url if possible
-  try {
-    // @ts-ignore - attempt to set import.meta.url
-    if (typeof import.meta !== "undefined" && !import.meta.url) {
-      // @ts-ignore
-      import.meta.url = `file:///tmp/netlify/functions/chat.ts`;
-    }
-  } catch (e) {
-    // Ignore - import.meta is read-only in some environments
-    console.log("Could not set import.meta.url polyfill:", e);
-  }
-}
+// ChromaDB Cloud automatically generates embeddings - no need for @xenova/transformers
+// This reduces function size from >250MB to <50MB
 
 const CHROMADB_API_KEY = process.env.CHROMADB_API_KEY || process.env.VITE_CHROMADB_API_KEY;
 const CHROMADB_TENANT = process.env.CHROMADB_TENANT || process.env.VITE_CHROMADB_TENANT;
@@ -63,53 +30,8 @@ const chromaClient = new CloudClient({
   database: CHROMADB_DATABASE!,
 });
 
-// Initialize embedding model (cached)
-let embeddingModel: any = null;
-
-async function getEmbeddingModel() {
-  if (!embeddingModel) {
-    embeddingModel = await pipeline(
-      "feature-extraction",
-      "Xenova/all-MiniLM-L6-v2",
-      {
-        progress_callback: (progress: any) => {
-          if (progress.status === "downloading") {
-            console.log(`Downloading model: ${Math.round(progress.progress || 0)}%`);
-          }
-        },
-      }
-    );
-  }
-  return embeddingModel;
-}
-
-/**
- * Create embedding for text
- */
-async function createEmbedding(text: string): Promise<number[]> {
-  try {
-    const model = await getEmbeddingModel();
-    const output = await model(text, { pooling: "mean", normalize: true });
-    
-    // Handle different output formats
-    let embedding: number[];
-    if (output && typeof output.data !== 'undefined') {
-      embedding = Array.from(output.data) as number[];
-    } else if (Array.isArray(output)) {
-      embedding = output as number[];
-    } else if (output && typeof output === 'object' && 'data' in output) {
-      embedding = Array.from((output as any).data) as number[];
-    } else {
-      throw new Error("Unexpected embedding output format");
-    }
-    
-    console.log(`Created embedding with length: ${embedding.length}`);
-    return embedding;
-  } catch (error) {
-    console.error("Error creating embedding:", error);
-    throw new Error(`Failed to create embedding: ${error instanceof Error ? error.message : "Unknown error"}`);
-  }
-}
+// ChromaDB Cloud automatically generates embeddings from query text
+// No need to create embeddings manually
 
 /**
  * Get or create collection
@@ -136,15 +58,18 @@ async function getCollection() {
 
 /**
  * Search ChromaDB for relevant documents
+ * ChromaDB Cloud automatically generates embeddings from query text
  */
-async function searchRelevantDocuments(queryEmbedding: number[], nResults: number = 5) {
+async function searchRelevantDocuments(queryText: string, nResults: number = 5) {
   try {
     const collection = await getCollection();
     
-    console.log("Querying ChromaDB with embedding length:", queryEmbedding.length);
+    console.log("Querying ChromaDB with query text:", queryText.substring(0, 100) + "...");
+    console.log("ChromaDB Cloud will automatically generate embeddings from the query text");
     
+    // Use queryTexts instead of queryEmbeddings - ChromaDB Cloud generates embeddings automatically
     const results = await collection.query({
-      queryEmbeddings: [queryEmbedding],
+      queryTexts: [queryText],
       nResults: nResults,
     });
 
@@ -271,13 +196,10 @@ const handler = async (event: HandlerEvent, _context: HandlerContext) => {
 
     console.log("Processing query:", userQuery);
 
-    // Create embedding for the query
-    const queryEmbedding = await createEmbedding(userQuery);
-    console.log("Query embedding created, length:", queryEmbedding.length);
-
     // Search ChromaDB for relevant documents
-    console.log("Searching ChromaDB for relevant documents...");
-    const searchResults = await searchRelevantDocuments(queryEmbedding, 5);
+    // ChromaDB Cloud will automatically generate embeddings from the query text
+    console.log("Searching ChromaDB (embeddings will be generated automatically)...");
+    const searchResults = await searchRelevantDocuments(userQuery, 5);
 
     // Build context from retrieved documents
     let context = "";
