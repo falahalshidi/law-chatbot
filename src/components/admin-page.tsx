@@ -120,23 +120,26 @@ export default function AdminPage() {
       const contentType = response.headers.get("content-type");
       if (!contentType?.includes("application/json")) {
         const text = await response.text();
-        console.error("Non-JSON response received:", text.substring(0, 200));
-        console.error("This usually means Netlify Functions are not available. Make sure you're running on Netlify or using Netlify Dev.");
+        console.error("❌ Non-JSON response received:", text.substring(0, 200));
+        console.error("⚠️ Netlify Functions are not available!");
+        console.error("💡 Solution: Run 'npm run dev:netlify' or 'netlify dev' to start Netlify Functions locally");
         setFiles([]);
+        setError("Netlify Functions غير متاحة. استخدم 'npm run dev:netlify' لتشغيلها محلياً.");
         return;
       }
 
       if (response.ok) {
         const data = await response.json();
         setFiles(data.files || []);
+        setError(""); // Clear error if successful
       } else {
         console.error("Failed to load files:", response.status, response.statusText);
         setFiles([]);
       }
     } catch (err) {
       console.error("Error loading files:", err);
-      // Don't show error to user, just set empty array
       setFiles([]);
+      setError("فشل تحميل الملفات. تأكد من أن Netlify Functions تعمل.");
     }
   };
 
@@ -178,7 +181,7 @@ export default function AdminPage() {
         const text = await response.text();
         console.error("❌ Non-JSON response received:", text.substring(0, 200));
         setUploadStatus({ ...uploadStatus, [filename]: "error" });
-        setError("فشل رفع الملف. تأكد من أن Netlify Functions تعمل بشكل صحيح.");
+        setError("⚠️ Netlify Functions غير متاحة محلياً. استخدم 'npm run dev:netlify' أو انشر المشروع على Netlify.");
         return;
       }
 
