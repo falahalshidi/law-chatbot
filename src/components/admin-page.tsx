@@ -111,14 +111,32 @@ export default function AdminPage() {
 
       const response = await fetch(endpoint, {
         method: "GET",
+        headers: {
+          "Content-Type": "application/json",
+        },
       });
+
+      // Check if response is HTML (error page) instead of JSON
+      const contentType = response.headers.get("content-type");
+      if (!contentType?.includes("application/json")) {
+        const text = await response.text();
+        console.error("Non-JSON response received:", text.substring(0, 200));
+        console.error("This usually means Netlify Functions are not available. Make sure you're running on Netlify or using Netlify Dev.");
+        setFiles([]);
+        return;
+      }
 
       if (response.ok) {
         const data = await response.json();
         setFiles(data.files || []);
+      } else {
+        console.error("Failed to load files:", response.status, response.statusText);
+        setFiles([]);
       }
     } catch (err) {
       console.error("Error loading files:", err);
+      // Don't show error to user, just set empty array
+      setFiles([]);
     }
   };
 
@@ -154,9 +172,21 @@ export default function AdminPage() {
         }),
       });
 
+      // Check if response is HTML (error page) instead of JSON
+      const contentType = response.headers.get("content-type");
+      if (!contentType?.includes("application/json")) {
+        const text = await response.text();
+        console.error("❌ Non-JSON response received:", text.substring(0, 200));
+        setUploadStatus({ ...uploadStatus, [filename]: "error" });
+        setError("فشل رفع الملف. تأكد من أن Netlify Functions تعمل بشكل صحيح.");
+        return;
+      }
+
       if (response.ok) {
-        await response.json(); // Response consumed but data not needed
+        const data = await response.json();
+        console.log("✅ File uploaded successfully to ChromaDB:", data);
         setUploadStatus({ ...uploadStatus, [filename]: "success" });
+        setError(""); // Clear any previous errors
         await loadFiles();
         setTimeout(() => {
           setUploadStatus((prev) => {

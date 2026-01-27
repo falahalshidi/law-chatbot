@@ -37,20 +37,30 @@ if (typeof process !== "undefined") {
   }
 }
 
-const CHROMADB_API_KEY = process.env.CHROMADB_API_KEY || process.env.VITE_CHROMADB_API_KEY || "ck-3EDSUCED38no4aLq8rgMXzTwe14fvnATpGEkwWMgrkEV";
-const CHROMADB_TENANT = process.env.CHROMADB_TENANT || process.env.VITE_CHROMADB_TENANT || "bf8e9ba0-6e6f-4365-a930-2c5ef360f292";
-const CHROMADB_DATABASE = process.env.CHROMADB_DATABASE || process.env.VITE_CHROMADB_DATABASE || "lawchat";
-const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY || process.env.VITE_OPENROUTER_API_KEY || "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";
+const CHROMADB_API_KEY = process.env.CHROMADB_API_KEY || process.env.VITE_CHROMADB_API_KEY;
+const CHROMADB_TENANT = process.env.CHROMADB_TENANT || process.env.VITE_CHROMADB_TENANT;
+const CHROMADB_DATABASE = process.env.CHROMADB_DATABASE || process.env.VITE_CHROMADB_DATABASE;
+const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY || process.env.VITE_OPENROUTER_API_KEY;
 const OPENROUTER_MODEL = process.env.OPENROUTER_MODEL || process.env.VITE_OPENROUTER_MODEL || "z-ai/glm-4.5-air:free";
 const OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions";
 
 const COLLECTION_NAME = "law_documents";
 
+// Validate ChromaDB configuration
+if (!CHROMADB_API_KEY || !CHROMADB_TENANT || !CHROMADB_DATABASE) {
+  console.error("❌ ChromaDB configuration is missing!");
+  console.error("Required environment variables:", {
+    CHROMADB_API_KEY: !!CHROMADB_API_KEY,
+    CHROMADB_TENANT: !!CHROMADB_TENANT,
+    CHROMADB_DATABASE: !!CHROMADB_DATABASE,
+  });
+}
+
 // Initialize ChromaDB client
 const chromaClient = new CloudClient({
-  apiKey: CHROMADB_API_KEY,
-  tenant: CHROMADB_TENANT,
-  database: CHROMADB_DATABASE,
+  apiKey: CHROMADB_API_KEY!,
+  tenant: CHROMADB_TENANT!,
+  database: CHROMADB_DATABASE!,
 });
 
 // Initialize embedding model (cached)
@@ -77,9 +87,51 @@ async function getEmbeddingModel() {
  * Create embedding for text
  */
 async function createEmbedding(text: string): Promise<number[]> {
-  const model = await getEmbeddingModel();
-  const output = await model(text, { pooling: "mean", normalize: true });
-  return Array.from(output.data) as number[];
+  try {
+    const model = await getEmbeddingModel();
+    const output = await model(text, { pooling: "mean", normalize: true });
+    
+    // Handle different output formats
+    let embedding: number[];
+    if (output && typeof output.data !== 'undefined') {
+      embedding = Array.from(output.data) as number[];
+    } else if (Array.isArray(output)) {
+      embedding = output as number[];
+    } else if (output && typeof output === 'object' && 'data' in output) {
+      embedding = Array.from((output as any).data) as number[];
+    } else {
+      throw new Error("Unexpected embedding output format");
+    }
+    
+    console.log(`Created embedding with length: ${embedding.length}`);
+    return embedding;
+  } catch (error) {
+    console.error("Error creating embedding:", error);
+    throw new Error(`Failed to create embedding: ${error instanceof Error ? error.message : "Unknown error"}`);
+  }
+}
+
+/**
+ * Get or create collection
+ */
+async function getCollection() {
+  try {
+    const collection = await chromaClient.getCollection({
+      name: COLLECTION_NAME,
+    } as any);
+    return collection;
+  } catch (error) {
+    console.log("Collection not found, creating new one...");
+    try {
+      const collection = await chromaClient.createCollection({
+        name: COLLECTION_NAME,
+      });
+      return collection;
+    } catch (createError) {
+      console.error("Error creating collection:", createError);
+      throw new Error(`Failed to get or create ChromaDB collection: ${createError instanceof Error ? createError.message : "Unknown error"}`);
+    }
+  }
 }
 
 /**
@@ -87,18 +139,25 @@ async function createEmbedding(text: string): Promise<number[]> {
  */
 async function searchRelevantDocuments(queryEmbedding: number[], nResults: number = 5) {
   try {
-    const collection = await chromaClient.getCollection({
-      name: COLLECTION_NAME,
-    } as any);
-
+    const collection = await getCollection();
+    
+    console.log("Querying ChromaDB with embedding length:", queryEmbedding.length);
+    
     const results = await collection.query({
       queryEmbeddings: [queryEmbedding],
       nResults: nResults,
     });
 
+    console.log("ChromaDB query results:", {
+      documentsCount: results.documents?.[0]?.length || 0,
+      idsCount: results.ids?.[0]?.length || 0,
+      distancesCount: results.distances?.[0]?.length || 0,
+    });
+
     return results;
   } catch (error) {
     console.error("Error searching ChromaDB:", error);
+    console.error("Error details:", error instanceof Error ? error.stack : error);
     return null;
   }
 }
@@ -217,6 +276,7 @@ const handler = async (event: HandlerEvent, _context: HandlerContext) => {
     console.log("Query embedding created, length:", queryEmbedding.length);
 
     // Search ChromaDB for relevant documents
+    console.log("Searching ChromaDB for relevant documents...");
     const searchResults = await searchRelevantDocuments(queryEmbedding, 5);
 
     // Build context from retrieved documents
@@ -225,18 +285,63 @@ const handler = async (event: HandlerEvent, _context: HandlerContext) => {
       const relevantDocs = searchResults.documents[0];
       const distances = searchResults.distances?.[0] || [];
       
-      context = relevantDocs
-        .map((doc: string | null, index: number) => {
+      console.log(`Found ${relevantDocs.length} relevant documents`);
+      console.log(`Distances: ${distances.map(d => d.toFixed(3)).join(', ')}`);
+      
+      // Increase context length for better answers
+      const maxContextLength = 2500; // Increase to 2500 chars for better context
+      let contextLength = 0;
+      
+      // Sort documents by distance (most relevant first)
+      const docsWithDistances = relevantDocs.map((doc, index) => ({
+        doc,
+        distance: distances[index] || 1,
+        index
+      })).sort((a, b) => a.distance - b.distance);
+      
+      context = docsWithDistances
+        .map(({ doc, distance, index }) => {
+          // Very lenient distance threshold - include all documents (distance can be > 1.0)
+          // Lower distance = more relevant, but we'll include all found documents
           if (!doc) return null;
-          const distance = distances[index] || 1;
-          // Only include documents with reasonable similarity (distance < 0.8)
-          if (distance < 0.8) {
-            return `[مستند ${index + 1}]:\n${doc}`;
+          if (contextLength < maxContextLength) {
+            // Increase document size to 600 chars for better context
+            const truncatedDoc = doc.length > 600 ? doc.substring(0, 600) + "..." : doc;
+            const docText = `[مستند ${index + 1} - مسافة: ${distance.toFixed(3)}]:\n${truncatedDoc}`;
+            if (contextLength + docText.length > maxContextLength) {
+              // Truncate if needed
+              const remaining = maxContextLength - contextLength;
+              contextLength = maxContextLength;
+              return docText.substring(0, remaining) + "...";
+            }
+            contextLength += docText.length;
+            return docText;
           }
           return null;
         })
         .filter((doc): doc is string => doc !== null)
         .join("\n\n");
+      
+      if (context.length === 0 && docsWithDistances.length > 0) {
+        console.log("⚠️ WARNING: No context generated. Including top 3 documents anyway...");
+        // Include top 3 documents if no context was generated
+        context = docsWithDistances
+          .slice(0, 3)
+          .filter(({ doc }) => doc !== null)
+          .map(({ doc, distance, index }) => {
+            const truncatedDoc = doc!.length > 600 ? doc!.substring(0, 600) + "..." : doc!;
+            return `[مستند ${index + 1} - مسافة: ${distance.toFixed(3)}]:\n${truncatedDoc}`;
+          })
+          .join("\n\n");
+      }
+      
+      console.log(`Context length: ${context.length} characters`);
+      if (context.length > 0) {
+        console.log(`Context preview: ${context.substring(0, 300)}...`);
+      }
+    } else {
+      console.log("⚠️ No relevant documents found in ChromaDB");
+      console.log("Search results:", JSON.stringify(searchResults, null, 2));
     }
 
     // Advanced AI Research Assistant prompt for accurate, source-driven answers

@@ -1,11 +1,16 @@
 import { CloudClient } from "chromadb";
 import { CHROMADB_API_KEY, CHROMADB_TENANT, CHROMADB_DATABASE } from "./env";
 
+// Validate ChromaDB configuration
+if (!CHROMADB_API_KEY || !CHROMADB_TENANT || !CHROMADB_DATABASE) {
+  console.error("❌ ChromaDB configuration is missing! Please set VITE_CHROMADB_API_KEY, VITE_CHROMADB_TENANT, and VITE_CHROMADB_DATABASE in your .env file");
+}
+
 // Initialize ChromaDB client
 export const chromaClient = new CloudClient({
-  apiKey: CHROMADB_API_KEY,
-  tenant: CHROMADB_TENANT,
-  database: CHROMADB_DATABASE,
+  apiKey: CHROMADB_API_KEY!,
+  tenant: CHROMADB_TENANT!,
+  database: CHROMADB_DATABASE!,
 });
 
 // Collection name for storing documents

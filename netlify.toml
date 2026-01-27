@@ -5,15 +5,15 @@
 
 [functions]
   node_bundler = "esbuild"
-  external_node_modules = ["cohere-ai", "ollama"]
+  external_node_modules = ["cohere-ai"]
 
 [build.environment]
-  # ChromaDB Configuration
-  CHROMADB_API_KEY = "ck-3EDSUCED38no4aLq8rgMXzTwe14fvnATpGEkwWMgrkEV"
-  CHROMADB_TENANT = "bf8e9ba0-6e6f-4365-a930-2c5ef360f292"
-  CHROMADB_DATABASE = "lawchat"
+  # ChromaDB Configuration - Set these in Netlify Dashboard > Site settings > Environment variables
+  # CHROMADB_API_KEY = "your-api-key-here"
+  # CHROMADB_TENANT = "your-tenant-id-here"
+  # CHROMADB_DATABASE = "your-database-name-here"
   # OpenRouter Configuration
-  OPENROUTER_API_KEY = "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"
+  # OPENROUTER_API_KEY = "your-openrouter-api-key-here"
   OPENROUTER_MODEL = "z-ai/glm-4.5-air:free"
 
 # Redirect API calls to Netlify Functions (must come before catch-all)

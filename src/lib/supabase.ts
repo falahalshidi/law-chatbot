@@ -1,8 +1,8 @@
 import { createClient } from '@supabase/supabase-js';
 
-// Supabase configuration
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://tfilijyzvjnsbltqyono.supabase.co';
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRmaWxpanl6dmpuc2JsdHF5b25vIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjkzMzkzODgsImV4cCI6MjA4NDkxNTM4OH0.vtFEyx67G4SXRFzBdTqS2AMF5-cPC4-ZiYtbkWyKSxA';
+// Supabase configuration - Updated to new project: laawwww22
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://sehsfxueebydlhwlhncp.supabase.co';
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNlaHNmeHVlZWJ5ZGxod2xobmNwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk1MzgyMDEsImV4cCI6MjA4NTExNDIwMX0.vpP42cOslkRv5OAVov8oQjHYJyRcSyAxIJlY9Z4vmL4';
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 

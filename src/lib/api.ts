@@ -17,9 +17,8 @@ export async function sendMessage(
       content: userMessage,
     });
 
-    // Use Netlify Functions endpoint (works on both local and production)
-    // In production (Render static site), this will use Netlify Functions
-    // In local dev, this will use the proxy to Express server
+    // Use Netlify Functions endpoint
+    // Frontend uses /api/chat which redirects to Netlify Functions via _redirects
     const endpoint = "/api/chat";
 
     console.log("Sending request to:", endpoint);
@@ -49,8 +48,7 @@ export async function sendMessage(
           throw new Error(
             "لا يمكن الاتصال بالخادم. قد تكون المشكلة:\n" +
             "1. تحقق من اتصالك بالإنترنت\n" +
-            "2. تأكد من أن Ollama يعمل\n" +
-            "3. تأكد من أن Netlify Functions تعمل بشكل صحيح"
+            "2. تأكد من أن Netlify Functions تعمل بشكل صحيح"
           );
         }
       }
@@ -105,7 +103,7 @@ export async function sendMessage(
 
     console.log("Response data:", data);
 
-    // Handle response format from chat function (Ollama + ChromaDB)
+    // Handle response format from chat function (OpenRouter + ChromaDB)
     if (data.message && data.message.content) {
       return data.message.content;
     } else if (data.content) {

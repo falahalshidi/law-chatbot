@@ -39,17 +39,27 @@ if (typeof process !== "undefined") {
   }
 }
 
-const CHROMADB_API_KEY = process.env.CHROMADB_API_KEY || process.env.VITE_CHROMADB_API_KEY || "ck-3EDSUCED38no4aLq8rgMXzTwe14fvnATpGEkwWMgrkEV";
-const CHROMADB_TENANT = process.env.CHROMADB_TENANT || process.env.VITE_CHROMADB_TENANT || "bf8e9ba0-6e6f-4365-a930-2c5ef360f292";
-const CHROMADB_DATABASE = process.env.CHROMADB_DATABASE || process.env.VITE_CHROMADB_DATABASE || "lawchat";
+const CHROMADB_API_KEY = process.env.CHROMADB_API_KEY || process.env.VITE_CHROMADB_API_KEY;
+const CHROMADB_TENANT = process.env.CHROMADB_TENANT || process.env.VITE_CHROMADB_TENANT;
+const CHROMADB_DATABASE = process.env.CHROMADB_DATABASE || process.env.VITE_CHROMADB_DATABASE;
 
 const COLLECTION_NAME = "law_documents";
 
+// Validate ChromaDB configuration
+if (!CHROMADB_API_KEY || !CHROMADB_TENANT || !CHROMADB_DATABASE) {
+  console.error("❌ ChromaDB configuration is missing!");
+  console.error("Required environment variables:", {
+    CHROMADB_API_KEY: !!CHROMADB_API_KEY,
+    CHROMADB_TENANT: !!CHROMADB_TENANT,
+    CHROMADB_DATABASE: !!CHROMADB_DATABASE,
+  });
+}
+
 // Initialize ChromaDB client
 const chromaClient = new CloudClient({
-  apiKey: CHROMADB_API_KEY,
-  tenant: CHROMADB_TENANT,
-  database: CHROMADB_DATABASE,
+  apiKey: CHROMADB_API_KEY!,
+  tenant: CHROMADB_TENANT!,
+  database: CHROMADB_DATABASE!,
 });
 
 // Initialize embedding model (cached)
@@ -141,19 +151,27 @@ async function createEmbeddings(chunks: string[]): Promise<number[][]> {
  */
 async function getCollection() {
   try {
+    console.log(`Getting collection: ${COLLECTION_NAME}`);
     const collection = await chromaClient.getCollection({
       name: COLLECTION_NAME,
     } as any);
+    console.log("✅ Collection found and retrieved");
     return collection;
   } catch (error) {
-    console.log("Collection not found, creating new one...");
+    console.log("⚠️ Collection not found, creating new one...");
+    console.log("Error details:", error instanceof Error ? error.message : error);
     try {
       const collection = await chromaClient.createCollection({
         name: COLLECTION_NAME,
       });
+      console.log("✅ New collection created successfully");
       return collection;
     } catch (createError) {
-      console.error("Error creating collection:", createError);
+      console.error("❌ Error creating collection:", createError);
+      console.error("Create error details:", {
+        message: createError instanceof Error ? createError.message : "Unknown",
+        stack: createError instanceof Error ? createError.stack : undefined,
+      });
       throw new Error(`Failed to create ChromaDB collection: ${createError instanceof Error ? createError.message : "Unknown error"}`);
     }
   }
@@ -372,21 +390,53 @@ const handler = async (event: HandlerEvent, _context: HandlerContext) => {
 
     // Store in ChromaDB
     console.log("Connecting to ChromaDB...");
+    console.log("ChromaDB Config:", {
+      tenant: CHROMADB_TENANT,
+      database: CHROMADB_DATABASE,
+      apiKeyPrefix: CHROMADB_API_KEY?.substring(0, 10) + "...",
+      collectionName: COLLECTION_NAME,
+    });
+    
     const collection = await getCollection();
     console.log("Collection ready, adding documents...");
+    console.log(`Adding ${chunks.length} chunks with ${embeddings.length} embeddings`);
+    
+    // Validate arrays before adding
+    if (chunks.length !== embeddings.length || chunks.length !== metadata.length) {
+      console.error("Array length mismatch:", {
+        chunks: chunks.length,
+        embeddings: embeddings.length,
+        metadata: metadata.length,
+      });
+      throw new Error(`خطأ في البيانات: عدد الـ chunks (${chunks.length}) لا يطابق عدد الـ embeddings (${embeddings.length})`);
+    }
+    
+    // Validate embedding dimensions
+    const embeddingDim = embeddings[0]?.length;
+    if (!embeddingDim || embeddingDim === 0) {
+      throw new Error("خطأ: الـ embeddings فارغة أو غير صحيحة");
+    }
+    console.log(`Embedding dimension: ${embeddingDim}`);
     
     const ids = metadata.map((_, index) => `${filename}_chunk_${index}_${Date.now()}`);
 
     try {
+      console.log("Calling collection.add()...");
       await collection.add({
         ids: ids,
         embeddings: embeddings,
         documents: chunks,
         metadatas: metadata,
       });
-      console.log("Documents added successfully to ChromaDB");
+      console.log("✅ Documents added successfully to ChromaDB");
+      console.log(`✅ Added ${ids.length} document chunks`);
     } catch (chromaError) {
-      console.error("ChromaDB error:", chromaError);
+      console.error("❌ ChromaDB error:", chromaError);
+      console.error("Error details:", {
+        message: chromaError instanceof Error ? chromaError.message : "Unknown",
+        stack: chromaError instanceof Error ? chromaError.stack : undefined,
+        name: chromaError instanceof Error ? chromaError.name : undefined,
+      });
       throw new Error(`فشل حفظ الملف في ChromaDB: ${chromaError instanceof Error ? chromaError.message : "Unknown error"}`);
     }
 
