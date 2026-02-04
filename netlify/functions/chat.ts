@@ -1,12 +1,25 @@
 import type { HandlerEvent, HandlerContext } from "@netlify/functions";
 import { CloudClient } from "chromadb";
+import { localHashEmbeddingFunction } from "./_lib/hash-embedding";
 
 // ChromaDB Cloud automatically generates embeddings - no need for @xenova/transformers
 // This reduces function size from >250MB to <50MB
 
-const CHROMADB_API_KEY = process.env.CHROMADB_API_KEY || process.env.VITE_CHROMADB_API_KEY;
-const CHROMADB_TENANT = process.env.CHROMADB_TENANT || process.env.VITE_CHROMADB_TENANT;
-const CHROMADB_DATABASE = process.env.CHROMADB_DATABASE || process.env.VITE_CHROMADB_DATABASE;
+const CHROMADB_API_KEY =
+  process.env.CHROMADB_API_KEY ||
+  process.env.CHROMA_API_KEY ||
+  process.env.VITE_CHROMADB_API_KEY ||
+  process.env.VITE_CHROMA_API_KEY;
+const CHROMADB_TENANT =
+  process.env.CHROMADB_TENANT ||
+  process.env.CHROMA_TENANT ||
+  process.env.VITE_CHROMADB_TENANT ||
+  process.env.VITE_CHROMA_TENANT;
+const CHROMADB_DATABASE =
+  process.env.CHROMADB_DATABASE ||
+  process.env.CHROMA_DATABASE ||
+  process.env.VITE_CHROMADB_DATABASE ||
+  process.env.VITE_CHROMA_DATABASE;
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY || process.env.VITE_OPENROUTER_API_KEY;
 const OPENROUTER_MODEL = process.env.OPENROUTER_MODEL || process.env.VITE_OPENROUTER_MODEL || "z-ai/glm-4.5-air:free";
 const OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions";
@@ -47,6 +60,7 @@ async function getCollection() {
   try {
     const collection = await chromaClient.getCollection({
       name: COLLECTION_NAME,
+      embeddingFunction: localHashEmbeddingFunction as any,
     } as any);
     return collection;
   } catch (error) {
@@ -54,6 +68,7 @@ async function getCollection() {
     try {
       const collection = await chromaClient.createCollection({
         name: COLLECTION_NAME,
+        embeddingFunction: localHashEmbeddingFunction as any,
       });
       return collection;
     } catch (createError) {
