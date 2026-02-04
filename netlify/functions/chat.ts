@@ -138,9 +138,11 @@ async function callChatApi(messages: Array<{ role: string; content: string }>) {
       },
       body: JSON.stringify({
         model: CHAT_MODEL,
-        messages: messages,
+        messages,
+        stream: false,
         temperature: 0.2,
         max_tokens: 1000,
+        max_completion_tokens: 1000,
       }),
       signal: AbortSignal.timeout(120000), // 120 seconds timeout
     });
@@ -151,8 +153,32 @@ async function callChatApi(messages: Array<{ role: string; content: string }>) {
       throw new Error(`Chat API error (${response.status}): ${errorText}`);
     }
 
-    const data = await response.json();
-    return data.choices?.[0]?.message?.content || data.choices?.[0]?.text || "لا يمكن الحصول على رد من المزود";
+    const raw = await response.text();
+    let data: any = {};
+    try {
+      data = JSON.parse(raw);
+    } catch {
+      if (raw.trim()) return raw.trim();
+      throw new Error("Empty response body from provider");
+    }
+
+    const content =
+      data?.choices?.[0]?.message?.content ||
+      data?.choices?.[0]?.text ||
+      data?.message?.content ||
+      data?.message ||
+      data?.content ||
+      data?.response ||
+      data?.output?.[0]?.content?.[0]?.text ||
+      data?.output_text ||
+      "";
+
+    if (typeof content === "string" && content.trim()) {
+      return content.trim();
+    }
+
+    console.error("Unexpected chat API response format:", JSON.stringify(data).slice(0, 1000));
+    throw new Error("صيغة الاستجابة من مزود الذكاء غير متوقعة");
   } catch (error) {
     console.error("Error calling chat API:", error);
     if (error instanceof Error) {
