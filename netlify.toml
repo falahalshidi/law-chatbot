@@ -8,6 +8,9 @@
   external_node_modules = ["cohere-ai", "ollama"]
 
 [build.environment]
+  # Supabase Configuration (required for auth function)
+  # SUPABASE_URL = "https://your-project-ref.supabase.co"
+  # SUPABASE_SERVICE_ROLE_KEY = "your-service-role-key"
   # ChromaDB Configuration - Set these in Netlify Dashboard > Site settings > Environment variables
   # CHROMADB_API_KEY = "your-api-key-here"
   # CHROMADB_TENANT = "your-tenant-id-here"
@@ -27,6 +30,18 @@
 [[redirects]]
   from = "/api/chat"
   to = "/.netlify/functions/chat"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/api/auth"
+  to = "/.netlify/functions/auth"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/api/admin-users"
+  to = "/.netlify/functions/admin-users"
   status = 200
   force = true
 

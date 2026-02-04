@@ -2,7 +2,6 @@ import { useState, useEffect, useRef } from "react";
 import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { useNavigate } from "react-router-dom";
-import { supabase, type User } from "@/lib/supabase";
 import { Upload, FileText, X, Trash2 } from "lucide-react";
 
 interface UploadedFile {
@@ -10,6 +9,14 @@ interface UploadedFile {
   fileType: string;
   uploadedAt: string;
   chunkCount: number;
+}
+
+interface User {
+  id: string;
+  email: string;
+  is_admin: boolean;
+  is_approved: boolean;
+  created_at: string;
 }
 
 export default function AdminPage() {
@@ -43,16 +50,20 @@ export default function AdminPage() {
 
   const loadUsers = async () => {
     try {
-      const { data, error: fetchError } = await supabase
-        .from("users")
-        .select("*")
-        .order("created_at", { ascending: false });
+      const response = await fetch("/api/admin-users", {
+        method: "GET",
+        headers: {
+          "Content-Type": "application/json",
+        },
+      });
 
-      if (fetchError) {
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
         setError("حدث خطأ أثناء تحميل المستخدمين");
-        console.error(fetchError);
+        console.error("Failed to load users:", data);
       } else {
-        setUsers(data || []);
+        const data = await response.json();
+        setUsers(data.users || []);
       }
     } catch (err) {
       setError("حدث خطأ أثناء تحميل المستخدمين");
@@ -64,14 +75,21 @@ export default function AdminPage() {
 
   const handleApprove = async (userId: string) => {
     try {
-      const { error: updateError } = await supabase
-        .from("users")
-        .update({ is_approved: true })
-        .eq("id", userId);
+      const response = await fetch("/api/admin-users", {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          userId,
+          isApproved: true,
+        }),
+      });
 
-      if (updateError) {
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
         setError("حدث خطأ أثناء تحديث حالة المستخدم");
-        console.error(updateError);
+        console.error("Failed to approve user:", data);
       } else {
         loadUsers(); // Reload users
       }
@@ -83,14 +101,21 @@ export default function AdminPage() {
 
   const handleReject = async (userId: string) => {
     try {
-      const { error: updateError } = await supabase
-        .from("users")
-        .update({ is_approved: false })
-        .eq("id", userId);
+      const response = await fetch("/api/admin-users", {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          userId,
+          isApproved: false,
+        }),
+      });
 
-      if (updateError) {
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
         setError("حدث خطأ أثناء تحديث حالة المستخدم");
-        console.error(updateError);
+        console.error("Failed to reject user:", data);
       } else {
         loadUsers(); // Reload users
       }
@@ -629,4 +654,3 @@ export default function AdminPage() {
     </div>
   );
 }
-

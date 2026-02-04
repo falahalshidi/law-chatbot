@@ -22,12 +22,7 @@ if (!CHROMADB_API_KEY || !CHROMADB_TENANT || !CHROMADB_DATABASE) {
   });
 }
 
-// Initialize ChromaDB client
-const chromaClient = new CloudClient({
-  apiKey: CHROMADB_API_KEY!,
-  tenant: CHROMADB_TENANT!,
-  database: CHROMADB_DATABASE!,
-});
+let chromaClient: CloudClient | null = null;
 
 // ChromaDB Cloud automatically generates embeddings - no local model needed
 
@@ -67,13 +62,17 @@ function extractTextFromTXT(buffer: Buffer): string {
  */
 function splitTextIntoChunks(text: string, chunkSize: number = 1000, overlap: number = 200): string[] {
   const chunks: string[] = [];
+  const safeChunkSize = Math.max(1, chunkSize);
+  const safeOverlap = Math.max(0, Math.min(overlap, safeChunkSize - 1));
+  const step = safeChunkSize - safeOverlap;
   let start = 0;
 
   while (start < text.length) {
-    const end = Math.min(start + chunkSize, text.length);
+    const end = Math.min(start + safeChunkSize, text.length);
     const chunk = text.slice(start, end);
     chunks.push(chunk.trim());
-    start = end - overlap;
+    if (end === text.length) break;
+    start += step;
   }
 
   return chunks.filter(chunk => chunk.length > 0);
@@ -86,6 +85,18 @@ function splitTextIntoChunks(text: string, chunkSize: number = 1000, overlap: nu
  * Get or create collection
  */
 async function getCollection() {
+  if (!CHROMADB_API_KEY || !CHROMADB_TENANT || !CHROMADB_DATABASE) {
+    throw new Error("Missing ChromaDB environment variables (CHROMADB_API_KEY, CHROMADB_TENANT, CHROMADB_DATABASE)");
+  }
+
+  if (!chromaClient) {
+    chromaClient = new CloudClient({
+      apiKey: CHROMADB_API_KEY,
+      tenant: CHROMADB_TENANT,
+      database: CHROMADB_DATABASE,
+    });
+  }
+
   try {
     console.log(`Getting collection: ${COLLECTION_NAME}`);
     const collection = await chromaClient.getCollection({
@@ -393,4 +404,3 @@ const handler = async (event: HandlerEvent, _context: HandlerContext) => {
 };
 
 export { handler };
-

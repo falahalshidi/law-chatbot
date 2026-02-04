@@ -3,8 +3,6 @@ import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useNavigate } from "react-router-dom";
-import { supabase } from "@/lib/supabase";
-import { verifyPassword } from "@/lib/password";
 
 export default function LoginPage() {
   const navigate = useNavigate();
@@ -19,62 +17,66 @@ export default function LoginPage() {
     setLoading(true);
 
     try {
-      // First, check if user exists and is approved
-      const { data: users, error: userError } = await supabase
-        .from("users")
-        .select("*")
-        .eq("email", email)
-        .single();
+      const normalizedEmail = email.trim().toLowerCase();
 
-      if (userError || !users) {
-        setError("البريد الإلكتروني أو كلمة المرور غير صحيحة");
+      if (!normalizedEmail || !password) {
+        setError("يرجى إدخال البريد الإلكتروني وكلمة المرور");
         setLoading(false);
         return;
       }
 
-      if (!users.is_approved) {
-        setError("حسابك قيد المراجعة. يرجى انتظار موافقة الإدارة");
-        setLoading(false);
-        return;
-      }
+      const response = await fetch("/api/auth", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          action: "login",
+          email: normalizedEmail,
+          password,
+        }),
+      });
 
-      // Verify password against stored hash
-      // Support both old plain passwords (for migration) and new hashed passwords
-      let isPasswordValid = false;
-      
-      try {
-        // Check if password_hash is in the new format (contains ':')
-        if (users.password_hash && users.password_hash.includes(':')) {
-          // New hashed password format
-          isPasswordValid = await verifyPassword(password, users.password_hash);
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        const details = data.details && String(data.details);
+        const errMsg = data.error && typeof data.error === "string" ? data.error : "";
+        if (data.error === "PENDING_APPROVAL") {
+          setError("حسابك قيد المراجعة. يرجى انتظار موافقة الإدارة");
+        } else if (data.error === "INVALID_CREDENTIALS") {
+          setError("البريد الإلكتروني أو كلمة المرور غير صحيحة");
+        } else if (data.error === "Supabase is not configured on server" && details) {
+          setError("الإعدادات غير مكتملة: لم يتم تعيين مفتاح Supabase (SUPABASE_SERVICE_ROLE_KEY). راجع إعدادات الموقع.");
+        } else if (errMsg === "Database query failed" && details) {
+          setError(`خطأ في قاعدة البيانات: ${details}`);
+        } else if (details) {
+          setError(details);
+        } else if (errMsg) {
+          setError(errMsg);
         } else {
-          // Old plain password format (temporary support for migration)
-          // This allows old passwords to still work during migration
-          isPasswordValid = users.password_hash === password;
+          console.error("Login API error:", data);
+          setError("تعذر الاتصال بالخادم. تأكد من أن SUPABASE_URL و SUPABASE_SERVICE_ROLE_KEY يعودان لنفس مشروع Supabase.");
         }
-      } catch (verifyError) {
-        console.error('Password verification error:', verifyError);
-        setError("حدث خطأ أثناء التحقق من كلمة المرور");
         setLoading(false);
         return;
       }
 
-      if (isPasswordValid) {
-        // Store user session (without password)
+      if (data.user) {
         localStorage.setItem("user", JSON.stringify({
-          id: users.id,
-          email: users.email,
-          is_admin: users.is_admin,
+          id: data.user.id,
+          email: data.user.email,
+          is_admin: data.user.is_admin,
         }));
 
         // Redirect based on role
-        if (users.is_admin) {
+        if (data.user.is_admin) {
           navigate("/admin");
         } else {
           navigate("/chat");
         }
       } else {
-        setError("البريد الإلكتروني أو كلمة المرور غير صحيحة");
+        setError("حدث خطأ أثناء تسجيل الدخول");
       }
     } catch (err) {
       setError("حدث خطأ أثناء تسجيل الدخول");
@@ -163,4 +165,3 @@ export default function LoginPage() {
     </div>
   );
 }
-

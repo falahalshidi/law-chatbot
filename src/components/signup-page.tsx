@@ -3,8 +3,6 @@ import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useNavigate } from "react-router-dom";
-import { supabase } from "@/lib/supabase";
-import { hashPassword } from "@/lib/password";
 
 export default function SignupPage() {
   const navigate = useNavigate();
@@ -19,6 +17,12 @@ export default function SignupPage() {
     e.preventDefault();
     setError("");
     setSuccess(false);
+    const normalizedEmail = email.trim().toLowerCase();
+
+    if (!normalizedEmail) {
+      setError("يرجى إدخال بريد إلكتروني صحيح");
+      return;
+    }
 
     if (password !== confirmPassword) {
       setError("كلمات المرور غير متطابقة");
@@ -33,39 +37,36 @@ export default function SignupPage() {
     setLoading(true);
 
     try {
-      // Check if user already exists
-      const { data: existingUser } = await supabase
-        .from("users")
-        .select("*")
-        .eq("email", email)
-        .single();
+      const response = await fetch("/api/auth", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          action: "signup",
+          email: normalizedEmail,
+          password,
+          confirmPassword,
+        }),
+      });
 
-      if (existingUser) {
-        setError("هذا البريد الإلكتروني مستخدم بالفعل");
-        setLoading(false);
-        return;
-      }
+      const data = await response.json().catch(() => ({}));
 
-      // Hash the password before storing
-      const hashedPassword = await hashPassword(password);
-
-      // Create new user
-      const { error: insertError } = await supabase
-        .from("users")
-        .insert([
-          {
-            email,
-            password_hash: hashedPassword, // Stored as encrypted hash
-            is_admin: false,
-            is_approved: false, // New users need admin approval
-          },
-        ])
-        .select()
-        .single();
-
-      if (insertError) {
-        setError("حدث خطأ أثناء إنشاء الحساب");
-        console.error(insertError);
+      if (!response.ok) {
+        if (data.error === "EMAIL_EXISTS") {
+          setError("هذا البريد الإلكتروني مستخدم بالفعل");
+        } else if (data.error === "PASSWORD_MISMATCH") {
+          setError("كلمات المرور غير متطابقة");
+        } else if (data.error === "WEAK_PASSWORD") {
+          setError("كلمة المرور يجب أن تكون 6 أحرف على الأقل");
+        } else if (data.error === "Supabase is not configured on server" && data.details) {
+          setError("الإعدادات غير مكتملة: لم يتم تعيين مفتاح Supabase (SUPABASE_SERVICE_ROLE_KEY). راجع إعدادات الموقع.");
+        } else if (data.details && (String(data.details).includes("SUPABASE") || String(data.details).includes("Database"))) {
+          setError(`تعذر الاتصال بقاعدة البيانات: ${data.details}`);
+        } else {
+          console.error("Signup API error:", data);
+          setError(data.error && typeof data.error === "string" ? data.error : "حدث خطأ أثناء إنشاء الحساب");
+        }
       } else {
         setSuccess(true);
         setTimeout(() => {
@@ -200,4 +201,3 @@ export default function SignupPage() {
     </div>
   );
 }
-

@@ -1,5 +1,7 @@
 # Redirect API calls to Netlify Functions
 # Use 200! to force redirect even if path exists
+/api/auth /.netlify/functions/auth 200!
+/api/admin-users /.netlify/functions/admin-users 200!
 /api/upload-file /.netlify/functions/upload-file 200!
 /api/chat /.netlify/functions/chat 200!
 /api/* /.netlify/functions/:splat 200!

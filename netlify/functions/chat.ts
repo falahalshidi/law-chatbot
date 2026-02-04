@@ -23,12 +23,7 @@ if (!CHROMADB_API_KEY || !CHROMADB_TENANT || !CHROMADB_DATABASE) {
   });
 }
 
-// Initialize ChromaDB client
-const chromaClient = new CloudClient({
-  apiKey: CHROMADB_API_KEY!,
-  tenant: CHROMADB_TENANT!,
-  database: CHROMADB_DATABASE!,
-});
+let chromaClient: CloudClient | null = null;
 
 // ChromaDB Cloud automatically generates embeddings from query text
 // No need to create embeddings manually
@@ -37,6 +32,18 @@ const chromaClient = new CloudClient({
  * Get or create collection
  */
 async function getCollection() {
+  if (!CHROMADB_API_KEY || !CHROMADB_TENANT || !CHROMADB_DATABASE) {
+    throw new Error("Missing ChromaDB environment variables (CHROMADB_API_KEY, CHROMADB_TENANT, CHROMADB_DATABASE)");
+  }
+
+  if (!chromaClient) {
+    chromaClient = new CloudClient({
+      apiKey: CHROMADB_API_KEY,
+      tenant: CHROMADB_TENANT,
+      database: CHROMADB_DATABASE,
+    });
+  }
+
   try {
     const collection = await chromaClient.getCollection({
       name: COLLECTION_NAME,
@@ -208,7 +215,7 @@ const handler = async (event: HandlerEvent, _context: HandlerContext) => {
       const distances = searchResults.distances?.[0] || [];
       
       console.log(`Found ${relevantDocs.length} relevant documents`);
-      console.log(`Distances: ${distances.map(d => d.toFixed(3)).join(', ')}`);
+      console.log(`Distances: ${distances.map((d) => Number(d ?? 0).toFixed(3)).join(', ')}`);
       
       // Increase context length for better answers
       const maxContextLength = 2500; // Increase to 2500 chars for better context

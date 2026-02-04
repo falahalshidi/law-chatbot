@@ -1,10 +1,16 @@
 import { createClient } from '@supabase/supabase-js';
 
-// Supabase configuration - Updated to new project: laawwww22
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://sehsfxueebydlhwlhncp.supabase.co';
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNlaHNmeHVlZWJ5ZGxod2xobmNwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk1MzgyMDEsImV4cCI6MjA4NTExNDIwMX0.vpP42cOslkRv5OAVov8oQjHYJyRcSyAxIJlY9Z4vmL4';
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+if (!supabaseUrl || !supabaseAnonKey) {
+  console.warn("Supabase frontend keys are missing. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.");
+}
+
+export const supabase = createClient(
+  supabaseUrl || "https://example.supabase.co",
+  supabaseAnonKey || "missing-anon-key"
+);
 
 // Types
 export interface User {
@@ -14,4 +20,3 @@ export interface User {
   is_approved: boolean;
   created_at: string;
 }
-
