@@ -17,7 +17,9 @@
   # CHROMADB_DATABASE = "your-database-name-here"
   # OpenRouter Configuration
   # OPENROUTER_API_KEY = "your-openrouter-api-key-here"
-  OPENROUTER_MODEL = "z-ai/glm-4.5-air:free"
+  OPENROUTER_MODEL = "openai/gpt-5-mini"
+  APIFREE_MODEL = "openai/gpt-5-mini"
+  APIFREE_API_URL = "https://api.apifree.ai/v1/chat/completions"
 
 # Redirect API calls to Netlify Functions (must come before catch-all)
 # Use force=true to ensure redirects are applied even if path exists

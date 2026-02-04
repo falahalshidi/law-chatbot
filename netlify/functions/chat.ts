@@ -20,9 +20,18 @@ const CHROMADB_DATABASE =
   process.env.CHROMA_DATABASE ||
   process.env.VITE_CHROMADB_DATABASE ||
   process.env.VITE_CHROMA_DATABASE;
-const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY || process.env.VITE_OPENROUTER_API_KEY;
-const OPENROUTER_MODEL = process.env.OPENROUTER_MODEL || process.env.VITE_OPENROUTER_MODEL || "z-ai/glm-4.5-air:free";
-const OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions";
+const CHAT_API_KEY =
+  process.env.APIFREE_API_KEY ||
+  process.env.OPENROUTER_API_KEY ||
+  process.env.VITE_OPENROUTER_API_KEY;
+const CHAT_MODEL =
+  process.env.APIFREE_MODEL ||
+  process.env.OPENROUTER_MODEL ||
+  process.env.VITE_OPENROUTER_MODEL ||
+  "openai/gpt-5-mini";
+const CHAT_API_URL =
+  (process.env.APIFREE_API_URL || "https://api.apifree.ai/v1/chat/completions")
+    .replace("https://www.apifree.ai/", "https://api.apifree.ai/");
 
 const COLLECTION_NAME = "law_documents";
 
@@ -110,27 +119,25 @@ async function searchRelevantDocuments(queryText: string, nResults: number = 5) 
 }
 
 /**
- * Call OpenRouter API
+ * Call chat completion API (apifree.ai)
  */
-async function callOpenRouter(messages: Array<{ role: string; content: string }>) {
+async function callChatApi(messages: Array<{ role: string; content: string }>) {
   try {
-    if (!OPENROUTER_API_KEY) {
-      throw new Error("OPENROUTER_API_KEY غير موجود. يرجى إضافة المفتاح في ملف .env");
+    if (!CHAT_API_KEY) {
+      throw new Error("APIFREE_API_KEY غير موجود. يرجى إضافة المفتاح في ملف .env");
     }
 
-    console.log("Calling OpenRouter API");
-    console.log("Using model:", OPENROUTER_MODEL);
+    console.log("Calling chat API");
+    console.log("Using model:", CHAT_MODEL);
 
-    const response = await fetch(OPENROUTER_API_URL, {
+    const response = await fetch(CHAT_API_URL, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "Authorization": `Bearer ${OPENROUTER_API_KEY}`,
-        "HTTP-Referer": process.env.OPENROUTER_HTTP_REFERER || "https://law-chatbot-1y21.onrender.com",
-        "X-Title": "Law Chatbot",
+        "Authorization": `Bearer ${CHAT_API_KEY}`,
       },
       body: JSON.stringify({
-        model: OPENROUTER_MODEL,
+        model: CHAT_MODEL,
         messages: messages,
         temperature: 0.2,
         max_tokens: 1000,
@@ -140,25 +147,26 @@ async function callOpenRouter(messages: Array<{ role: string; content: string }>
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error("OpenRouter API error:", response.status, errorText);
-      throw new Error(`OpenRouter API error (${response.status}): ${errorText}`);
+      console.error("Chat API error:", response.status, errorText);
+      throw new Error(`Chat API error (${response.status}): ${errorText}`);
     }
 
     const data = await response.json();
-    return data.choices?.[0]?.message?.content || data.choices?.[0]?.text || "لا يمكن الحصول على رد من OpenRouter";
+    return data.choices?.[0]?.message?.content || data.choices?.[0]?.text || "لا يمكن الحصول على رد من المزود";
   } catch (error) {
-    console.error("Error calling OpenRouter:", error);
+    console.error("Error calling chat API:", error);
     if (error instanceof Error) {
       if (error.message.includes("fetch failed") || error.message.includes("ECONNREFUSED")) {
-        throw new Error(`لا يمكن الاتصال بـ OpenRouter API. تحقق من اتصالك بالإنترنت.`);
+        throw new Error(`لا يمكن الاتصال بخدمة الذكاء الاصطناعي. تحقق من اتصالك بالإنترنت.`);
       }
       if (error.message.includes("timeout") || error.name === "TimeoutError" || error.name === "AbortError") {
-        throw new Error("انتهت مهلة الاتصال بـ OpenRouter API. حاول مرة أخرى.");
+        throw new Error("انتهت مهلة الاتصال بالخدمة. حاول مرة أخرى.");
       }
     }
     throw error;
   }
 }
+
 
 const handler = async (event: HandlerEvent, _context: HandlerContext) => {
   // Handle CORS preflight
@@ -373,12 +381,11 @@ Answer in Arabic (العربية).`;
       },
     ];
 
-    console.log("Calling OpenRouter API with", openRouterMessages.length, "messages");
+    console.log("Calling chat API with", openRouterMessages.length, "messages");
     console.log("System prompt length:", systemPrompt.length, "characters");
 
-    // Call OpenRouter API - ONLY OpenRouter, NO Ollama
-    console.log("🚀 Calling OpenRouter API with model:", OPENROUTER_MODEL);
-    const openRouterResponse = await callOpenRouter(openRouterMessages);
+    console.log("🚀 Calling chat API with model:", CHAT_MODEL);
+    const openRouterResponse = await callChatApi(openRouterMessages);
 
     console.log("OpenRouter response received");
 
