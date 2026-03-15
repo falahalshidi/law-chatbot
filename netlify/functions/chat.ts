@@ -1,6 +1,7 @@
 import type { HandlerEvent, HandlerContext } from "@netlify/functions";
 import { CloudClient } from "chromadb";
 import { localHashEmbeddingFunction } from "./_lib/hash-embedding";
+import { detectCategory, expandQueryByCategory } from "./_lib/document-classifier";
 
 // ChromaDB Cloud automatically generates embeddings - no need for @xenova/transformers
 // This reduces function size from >250MB to <50MB
@@ -47,6 +48,20 @@ if (!CHROMADB_API_KEY || !CHROMADB_TENANT || !CHROMADB_DATABASE) {
 
 let chromaClient: CloudClient | null = null;
 
+function getShortSocialReply(text: string): string | null {
+  const normalized = text.trim().toLowerCase();
+
+  if (["السلام عليكم", "سلام عليكم", "السلام عليكم ورحمة الله", "السلام عليكم ورحمه الله"].includes(normalized)) {
+    return "وعليكم السلام";
+  }
+
+  if (["مرحبا", "هلا", "اهلا", "أهلا", "السلام", "hi", "hello"].includes(normalized)) {
+    return "مرحبا";
+  }
+
+  return null;
+}
+
 // ChromaDB Cloud automatically generates embeddings from query text
 // No need to create embeddings manually
 
@@ -91,23 +106,60 @@ async function getCollection() {
  * Search ChromaDB for relevant documents
  * ChromaDB Cloud automatically generates embeddings from query text
  */
-async function searchRelevantDocuments(queryText: string, nResults: number = 5) {
+async function searchRelevantDocuments(queryText: string, nResults: number = 8) {
   try {
     const collection = await getCollection();
-    
-    console.log("Querying ChromaDB with query text:", queryText.substring(0, 100) + "...");
-    console.log("ChromaDB Cloud will automatically generate embeddings from the query text");
-    
-    // Use queryTexts instead of queryEmbeddings - ChromaDB Cloud generates embeddings automatically
-    const results = await collection.query({
-      queryTexts: [queryText],
-      nResults: nResults,
+
+    const category = detectCategory(queryText);
+    const expandedQuery = expandQueryByCategory(queryText, category);
+    console.log("Querying ChromaDB with query text:", expandedQuery.substring(0, 120) + "...");
+
+    const primaryWhere = category !== "general" ? ({ category } as any) : undefined;
+
+    let results = await collection.query({
+      queryTexts: [expandedQuery],
+      nResults,
+      where: primaryWhere,
     });
+
+    const primaryCount = results.documents?.[0]?.length || 0;
+    if (primaryCount < 3 && category !== "general") {
+      const fallback = await collection.query({
+        queryTexts: [expandedQuery],
+        nResults,
+      });
+
+      const mergedDocs = [
+        ...(results.documents?.[0] || []),
+        ...(fallback.documents?.[0] || []),
+      ];
+      const mergedDistances = [
+        ...(results.distances?.[0] || []),
+        ...(fallback.distances?.[0] || []),
+      ];
+      const mergedMetadatas = [
+        ...(results.metadatas?.[0] || []),
+        ...(fallback.metadatas?.[0] || []),
+      ];
+      const mergedIds = [
+        ...(results.ids?.[0] || []),
+        ...(fallback.ids?.[0] || []),
+      ];
+
+      results = {
+        ...fallback,
+        documents: [mergedDocs],
+        distances: [mergedDistances],
+        metadatas: [mergedMetadatas],
+        ids: [mergedIds],
+      } as any;
+    }
 
     console.log("ChromaDB query results:", {
       documentsCount: results.documents?.[0]?.length || 0,
       idsCount: results.ids?.[0]?.length || 0,
       distancesCount: results.distances?.[0]?.length || 0,
+      category,
     });
 
     return results;
@@ -252,6 +304,22 @@ const handler = async (event: HandlerEvent, _context: HandlerContext) => {
 
     console.log("Processing query:", userQuery);
 
+    const socialReply = getShortSocialReply(userQuery);
+    if (socialReply) {
+      return {
+        statusCode: 200,
+        headers: {
+          "Access-Control-Allow-Origin": "*",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          message: {
+            content: socialReply,
+          },
+        }),
+      };
+    }
+
     // Search ChromaDB for relevant documents
     // ChromaDB Cloud will automatically generate embeddings from the query text
     console.log("Searching ChromaDB (embeddings will be generated automatically)...");
@@ -262,6 +330,7 @@ const handler = async (event: HandlerEvent, _context: HandlerContext) => {
     if (searchResults && searchResults.documents && searchResults.documents[0]) {
       const relevantDocs = searchResults.documents[0];
       const distances = searchResults.distances?.[0] || [];
+      const metadatas = searchResults.metadatas?.[0] || [];
       
       console.log(`Found ${relevantDocs.length} relevant documents`);
       console.log(`Distances: ${distances.map((d) => Number(d ?? 0).toFixed(3)).join(', ')}`);
@@ -274,20 +343,25 @@ const handler = async (event: HandlerEvent, _context: HandlerContext) => {
       const docsWithDistances = relevantDocs.map((doc, index) => ({
         doc,
         distance: distances[index] || 1,
-        index
+        index,
+        metadata: metadatas[index] || null,
       })).sort((a, b) => a.distance - b.distance);
-      
+
+      const seenDocuments = new Set<string>();
       context = docsWithDistances
-        .map(({ doc, distance, index }) => {
-          // Very lenient distance threshold - include all documents (distance can be > 1.0)
-          // Lower distance = more relevant, but we'll include all found documents
+        .map(({ doc, index, metadata }) => {
           if (!doc) return null;
+          const documentKey = String(metadata?.documentId || metadata?.filename || index);
+          if (seenDocuments.has(`${documentKey}:${doc.slice(0, 120)}`)) {
+            return null;
+          }
+          seenDocuments.add(`${documentKey}:${doc.slice(0, 120)}`);
+
           if (contextLength < maxContextLength) {
-            // Increase document size to 600 chars for better context
             const truncatedDoc = doc.length > 600 ? doc.substring(0, 600) + "..." : doc;
-            const docText = `[مستند ${index + 1} - مسافة: ${distance.toFixed(3)}]:\n${truncatedDoc}`;
+            const category = metadata?.category ? ` - تصنيف: ${metadata.category}` : "";
+            const docText = `[مستند ${index + 1}${category}]:\n${truncatedDoc}`;
             if (contextLength + docText.length > maxContextLength) {
-              // Truncate if needed
               const remaining = maxContextLength - contextLength;
               contextLength = maxContextLength;
               return docText.substring(0, remaining) + "...";
@@ -302,13 +376,13 @@ const handler = async (event: HandlerEvent, _context: HandlerContext) => {
       
       if (context.length === 0 && docsWithDistances.length > 0) {
         console.log("⚠️ WARNING: No context generated. Including top 3 documents anyway...");
-        // Include top 3 documents if no context was generated
         context = docsWithDistances
           .slice(0, 3)
           .filter(({ doc }) => doc !== null)
-          .map(({ doc, distance, index }) => {
+          .map(({ doc, index, metadata }) => {
             const truncatedDoc = doc!.length > 600 ? doc!.substring(0, 600) + "..." : doc!;
-            return `[مستند ${index + 1} - مسافة: ${distance.toFixed(3)}]:\n${truncatedDoc}`;
+            const category = metadata?.category ? ` - تصنيف: ${metadata.category}` : "";
+            return `[مستند ${index + 1}${category}]:\n${truncatedDoc}`;
           })
           .join("\n\n");
       }
@@ -322,20 +396,20 @@ const handler = async (event: HandlerEvent, _context: HandlerContext) => {
       console.log("Search results:", JSON.stringify(searchResults, null, 2));
     }
 
-    // Strict RAG system prompt (Arabic-only answers, concise when needed)
+    // Best-effort legal assistant prompt with ChromaDB-first retrieval.
     const systemPrompt = context
-      ? `You are an AI assistant operating as a Retrieval-Augmented Generation (RAG) system.
+      ? `You are an Arabic legal assistant working in best-effort mode.
 
-Your primary task is to answer user questions strictly and exclusively based on the content available in the provided documents.
+Your first priority is to use the retrieved ChromaDB context below. Prefer the retrieved files, combine matching points, and answer the user's exact question directly.
 
 Rules:
-1) Do not use any external knowledge, assumptions, general information, or personal reasoning beyond what is explicitly stated in the provided context.
-2) If the documents do not contain sufficient or clear information, state clearly that there is not enough information in the documents to provide an answer. Do not guess or infer.
-3) All final responses must be written in Arabic, while preserving the original meaning accurately and without adding new information.
-4) Do not mention document names or references unless the user explicitly requests this.
-5) Use a professional and clear style. You may use short, simple headings when useful, without excessive formatting.
-6) Keep responses directly proportional to the user's input. For very short or social inputs (e.g., "السلام عليكم"), reply briefly and only as needed (e.g., "وعليكم السلام") without extra details.
-7) Do not add information outside the user's question or outside the provided context.
+1) Answer only in Arabic.
+2) Keep the answer proportional to the question. If the question is short, the answer should be short.
+3) Prefer the retrieved context first, especially if it is sufficient.
+4) If the context is partial, complete the answer in a sensible and professional way without saying that the information is unavailable.
+5) Do not mention file names unless the user explicitly asks.
+6) If the user asks about a specific legal area, stay focused on that area only.
+7) Use short headings only when they help readability.
 
 === RETRIEVED CONTEXT ===
 ${context}
@@ -343,16 +417,17 @@ ${context}
 === USER QUESTION ===
 ${userQuery}
 
-Answer in Arabic based only on the retrieved context above.`
-      : `You are an AI assistant operating as a Retrieval-Augmented Generation (RAG) system.
+Answer in Arabic, using the context first and staying concise and useful.`
+      : `You are an Arabic legal assistant.
 
 Rules:
 1) Answer only in Arabic.
-2) If the required answer is not in the provided documents/context, say clearly that there is not enough information in the documents to answer.
-3) Do not guess or add external knowledge.
-4) Keep responses proportional to the user input; for greetings or very short social text, respond briefly only (e.g., "وعليكم السلام").
+2) Keep the answer proportional to the user's question.
+3) Since no retrieved context was found, still give the best helpful answer you can in a confident, concise way.
+4) Do not mention that the database lacks information.
+5) For greetings or social text, answer very briefly.
 
-No retrieved context is available for this question. Respond accordingly in Arabic.`;
+Respond in Arabic.`;
 
     // Simplify messages - only send system prompt and current query
     const openRouterMessages = [

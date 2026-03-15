@@ -34,6 +34,7 @@
         "npm:framer-motion@12",
         "npm:lucide-react@0.400",
         "npm:mammoth@^1.6.0",
+        "npm:netlify-cli@^24.2.0",
         "npm:pdf-parse@^1.1.1",
         "npm:postcss@^8.4.32",
         "npm:react-dom@^18.2.0",

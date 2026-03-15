@@ -1,6 +1,7 @@
 import type { HandlerEvent, HandlerContext } from "@netlify/functions";
 import { createClient } from "@supabase/supabase-js";
 import { pbkdf2Sync, randomBytes, timingSafeEqual } from "node:crypto";
+import { normalizeUserStatus, statusToLegacyApproval, type UserStatus } from "./_lib/user-status";
 
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
 const SUPABASE_KEY =
@@ -86,7 +87,12 @@ const handler = async (event: HandlerEvent, _context: HandlerContext) => {
         return jsonResponse(401, { error: "INVALID_CREDENTIALS" });
       }
 
-      if (!user.is_approved) {
+      const status = normalizeUserStatus(user);
+      if (status === "rejected") {
+        return jsonResponse(403, { error: "REJECTED_ACCOUNT" });
+      }
+
+      if (status !== "accepted" && !user.is_admin) {
         return jsonResponse(403, { error: "PENDING_APPROVAL" });
       }
 
@@ -95,6 +101,7 @@ const handler = async (event: HandlerEvent, _context: HandlerContext) => {
           id: user.id,
           email: user.email,
           is_admin: !!user.is_admin,
+          status,
         },
       });
     }
@@ -123,18 +130,40 @@ const handler = async (event: HandlerEvent, _context: HandlerContext) => {
       }
 
       const passwordHash = hashPassword(password);
-      const { data: inserted, error: insertError } = await supabase
+      const baseUserPayload = {
+        email,
+        password_hash: passwordHash,
+        is_admin: false,
+        is_approved: statusToLegacyApproval("pending" as UserStatus),
+      };
+
+      let inserted: { id: string } | null = null;
+      let insertError: { message: string } | null = null;
+
+      const primaryInsert = await supabase
         .from("users")
         .insert([
           {
-            email,
-            password_hash: passwordHash,
-            is_admin: false,
-            is_approved: false,
+            ...baseUserPayload,
+            status: "pending",
           },
         ])
         .select("id")
         .single();
+
+      inserted = primaryInsert.data;
+      insertError = primaryInsert.error;
+
+      if (insertError && insertError.message.toLowerCase().includes("status")) {
+        const fallbackInsert = await supabase
+          .from("users")
+          .insert([baseUserPayload])
+          .select("id")
+          .single();
+
+        inserted = fallbackInsert.data;
+        insertError = fallbackInsert.error;
+      }
 
       if (insertError) {
         return jsonResponse(500, { error: "Failed to create user", details: insertError.message });
@@ -142,7 +171,7 @@ const handler = async (event: HandlerEvent, _context: HandlerContext) => {
 
       return jsonResponse(201, {
         success: true,
-        userId: inserted.id,
+        userId: inserted!.id,
       });
     }
 

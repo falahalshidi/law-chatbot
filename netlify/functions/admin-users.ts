@@ -1,5 +1,6 @@
 import type { HandlerEvent, HandlerContext } from "@netlify/functions";
 import { createClient } from "@supabase/supabase-js";
+import { normalizeUserStatus, statusToLegacyApproval, type UserStatus } from "./_lib/user-status";
 
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -42,22 +43,59 @@ const handler = async (event: HandlerEvent, _context: HandlerContext) => {
         return jsonResponse(500, { error: error.message });
       }
 
-      return jsonResponse(200, { users: data || [] });
+      return jsonResponse(200, {
+        users: (data || []).map((user) => ({
+          ...user,
+          status: normalizeUserStatus(user),
+        })),
+      });
     }
 
     if (event.httpMethod === "PATCH") {
       const body = JSON.parse(event.body || "{}");
       const userId = String(body.userId || "");
-      const isApproved = Boolean(body.isApproved);
+      const nextStatus = typeof body.status === "string" ? (body.status as UserStatus) : undefined;
+      const isAdmin = typeof body.isAdmin === "boolean" ? body.isAdmin : undefined;
 
       if (!userId) {
         return jsonResponse(400, { error: "userId is required" });
       }
 
-      const { error } = await supabase
+      const updates: Record<string, unknown> = {};
+
+      if (nextStatus) {
+        updates.status = nextStatus;
+        updates.is_approved = statusToLegacyApproval(nextStatus);
+      }
+
+      if (typeof isAdmin === "boolean") {
+        updates.is_admin = isAdmin;
+        if (isAdmin) {
+          updates.is_approved = true;
+          updates.status = "accepted";
+        }
+      }
+
+      if (Object.keys(updates).length === 0) {
+        return jsonResponse(400, { error: "No updates provided" });
+      }
+
+      let { error } = await supabase
         .from("users")
-        .update({ is_approved: isApproved })
+        .update(updates)
         .eq("id", userId);
+
+      if (error && error.message.toLowerCase().includes("status")) {
+        const fallbackUpdates = { ...updates };
+        delete fallbackUpdates.status;
+
+        const fallbackResult = await supabase
+          .from("users")
+          .update(fallbackUpdates)
+          .eq("id", userId);
+
+        error = fallbackResult.error;
+      }
 
       if (error) {
         return jsonResponse(500, { error: error.message });

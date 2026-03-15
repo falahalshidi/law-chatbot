@@ -5,10 +5,12 @@ import { useNavigate } from "react-router-dom";
 import { Upload, FileText, X, Trash2 } from "lucide-react";
 
 interface UploadedFile {
+  documentId?: string;
   filename: string;
   fileType: string;
   uploadedAt: string;
   chunkCount: number;
+  status?: string;
 }
 
 interface User {
@@ -16,6 +18,7 @@ interface User {
   email: string;
   is_admin: boolean;
   is_approved: boolean;
+  status?: "pending" | "accepted" | "rejected";
   created_at: string;
 }
 
@@ -28,6 +31,23 @@ export default function AdminPage() {
   const [uploading, setUploading] = useState(false);
   const [uploadStatus, setUploadStatus] = useState<{ [key: string]: "uploading" | "success" | "error" }>({});
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const getCurrentUser = () => {
+    const userStr = localStorage.getItem("user");
+    return userStr ? JSON.parse(userStr) : null;
+  };
+
+  const getStatusLabel = (status?: User["status"]) => {
+    if (status === "accepted") return "مقبول";
+    if (status === "rejected") return "مرفوض";
+    return "بانتظار المراجعة";
+  };
+
+  const getStatusClasses = (status?: User["status"]) => {
+    if (status === "accepted") return "bg-green-100 text-green-800";
+    if (status === "rejected") return "bg-red-100 text-red-800";
+    return "bg-yellow-100 text-yellow-800";
+  };
 
   useEffect(() => {
     // Check if user is logged in and is admin
@@ -73,23 +93,20 @@ export default function AdminPage() {
     }
   };
 
-  const handleApprove = async (userId: string) => {
+  const updateUser = async (userId: string, updates: { status?: User["status"]; isAdmin?: boolean }) => {
     try {
       const response = await fetch("/api/admin-users", {
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          userId,
-          isApproved: true,
-        }),
+        body: JSON.stringify({ userId, ...updates }),
       });
 
       if (!response.ok) {
         const data = await response.json().catch(() => ({}));
         setError("حدث خطأ أثناء تحديث حالة المستخدم");
-        console.error("Failed to approve user:", data);
+        console.error("Failed to update user:", data);
       } else {
         loadUsers(); // Reload users
       }
@@ -99,30 +116,16 @@ export default function AdminPage() {
     }
   };
 
-  const handleReject = async (userId: string) => {
-    try {
-      const response = await fetch("/api/admin-users", {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          userId,
-          isApproved: false,
-        }),
-      });
+  const handleApprove = async (userId: string) => {
+    await updateUser(userId, { status: "accepted" });
+  };
 
-      if (!response.ok) {
-        const data = await response.json().catch(() => ({}));
-        setError("حدث خطأ أثناء تحديث حالة المستخدم");
-        console.error("Failed to reject user:", data);
-      } else {
-        loadUsers(); // Reload users
-      }
-    } catch (err) {
-      setError("حدث خطأ أثناء تحديث حالة المستخدم");
-      console.error(err);
-    }
+  const handleReject = async (userId: string) => {
+    await updateUser(userId, { status: "rejected" });
+  };
+
+  const handleToggleAdmin = async (userId: string, nextIsAdmin: boolean) => {
+    await updateUser(userId, { isAdmin: nextIsAdmin });
   };
 
   const handleLogout = () => {
@@ -168,90 +171,77 @@ export default function AdminPage() {
     }
   };
 
-  const handleFileSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const selectedFile = event.target.files?.[0];
-    if (!selectedFile) return;
+  const uploadFiles = async (selectedFiles: File[]) => {
+    if (selectedFiles.length === 0) return;
 
-    const filename = selectedFile.name;
-    setUploadStatus({ ...uploadStatus, [filename]: "uploading" });
     setUploading(true);
+    const currentUser = getCurrentUser();
 
     try {
-      // Convert file to base64
-      const fileBuffer = await selectedFile.arrayBuffer();
-      const base64 = btoa(
-        new Uint8Array(fileBuffer).reduce(
-          (data, byte) => data + String.fromCharCode(byte),
-          ""
-        )
-      );
+      for (const selectedFile of selectedFiles) {
+        const filename = selectedFile.name;
+        setUploadStatus((prev) => ({ ...prev, [filename]: "uploading" }));
 
-      const endpoint = "/api/upload-file";
-
-      const response = await fetch(endpoint, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          file: base64,
-          filename: filename,
-          fileType: selectedFile.type,
-        }),
-      });
-
-      // Check if response is HTML (error page) instead of JSON
-      const contentType = response.headers.get("content-type");
-      if (!contentType?.includes("application/json")) {
-        const text = await response.text();
-        console.error("❌ Non-JSON response received:", text.substring(0, 200));
-        setUploadStatus({ ...uploadStatus, [filename]: "error" });
-        setError("⚠️ Netlify Functions غير متاحة محلياً. استخدم 'npm run dev:netlify' أو انشر المشروع على Netlify.");
-        return;
-      }
-
-      if (response.ok) {
-        const data = await response.json();
-        console.log("✅ File uploaded successfully to ChromaDB:", data);
-        setUploadStatus({ ...uploadStatus, [filename]: "success" });
-        setError(""); // Clear any previous errors
-        await loadFiles();
-        setTimeout(() => {
-          setUploadStatus((prev) => {
-            const newStatus = { ...prev };
-            delete newStatus[filename];
-            return newStatus;
-          });
-        }, 3000);
-      } else {
-        let errorMessage = "فشل رفع الملف";
         try {
-          // Read response body once
+          const fileBuffer = await selectedFile.arrayBuffer();
+          const base64 = btoa(
+            new Uint8Array(fileBuffer).reduce(
+              (data, byte) => data + String.fromCharCode(byte),
+              ""
+            )
+          );
+
+          const response = await fetch("/api/upload-file", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              file: base64,
+              filename,
+              fileType: selectedFile.type,
+              size: selectedFile.size,
+              uploadedBy: currentUser?.id ?? null,
+            }),
+          });
+
           const contentType = response.headers.get("content-type");
-          let errorData: any;
-          
-          if (contentType?.includes("application/json")) {
-            errorData = await response.json();
-            errorMessage = errorData.error || errorData.message || errorMessage;
-            if (errorData.details) {
-              console.error("Error details:", errorData.details);
-            }
-          } else {
-            const errorText = await response.text();
-            errorMessage = errorText || errorMessage;
+          if (!contentType?.includes("application/json")) {
+            const text = await response.text();
+            console.error("❌ Non-JSON response received:", text.substring(0, 200));
+            setUploadStatus((prev) => ({ ...prev, [filename]: "error" }));
+            setError("⚠️ Netlify Functions غير متاحة محلياً. استخدم 'npm run dev:netlify' أو انشر المشروع على Netlify.");
+            continue;
           }
-        } catch (parseError) {
-          errorMessage = `خطأ ${response.status}: ${response.statusText}`;
-          console.error("Error parsing response:", parseError);
+
+          if (response.ok) {
+            await response.json();
+            setUploadStatus((prev) => ({ ...prev, [filename]: "success" }));
+            setError("");
+          } else {
+            let errorMessage = "فشل رفع الملف";
+            try {
+              const errorData = await response.json();
+              errorMessage = errorData.error || errorData.message || errorMessage;
+            } catch (parseError) {
+              errorMessage = `خطأ ${response.status}: ${response.statusText}`;
+              console.error("Error parsing response:", parseError);
+            }
+            setUploadStatus((prev) => ({ ...prev, [filename]: "error" }));
+            setError(errorMessage);
+          }
+        } catch (err) {
+          setUploadStatus((prev) => ({ ...prev, [filename]: "error" }));
+          const errorMessage = err instanceof Error ? err.message : "حدث خطأ أثناء رفع الملف";
+          setError(`خطأ في الاتصال: ${errorMessage}`);
+          console.error("Upload error:", err);
         }
-        setUploadStatus({ ...uploadStatus, [filename]: "error" });
-        setError(errorMessage);
       }
-    } catch (err) {
-      setUploadStatus({ ...uploadStatus, [filename]: "error" });
-      const errorMessage = err instanceof Error ? err.message : "حدث خطأ أثناء رفع الملف";
-      setError(`خطأ في الاتصال: ${errorMessage}`);
-      console.error("Upload error:", err);
+
+      await loadFiles();
+      setTimeout(() => {
+        setUploadStatus({});
+      }, 3000);
     } finally {
       setUploading(false);
       if (fileInputRef.current) {
@@ -260,8 +250,13 @@ export default function AdminPage() {
     }
   };
 
-  const handleDeleteFile = async (filename: string) => {
-    if (!confirm(`هل أنت متأكد من حذف الملف "${filename}"؟`)) {
+  const handleFileSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const selectedFiles = Array.from(event.target.files || []);
+    await uploadFiles(selectedFiles);
+  };
+
+  const handleDeleteFile = async (file: UploadedFile) => {
+    if (!confirm(`هل أنت متأكد من حذف الملف "${file.filename}"؟`)) {
       return;
     }
 
@@ -273,7 +268,7 @@ export default function AdminPage() {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ filename }),
+        body: JSON.stringify({ filename: file.filename, documentId: file.documentId }),
       });
 
       if (response.ok) {
@@ -308,79 +303,8 @@ export default function AdminPage() {
     e.preventDefault();
     e.stopPropagation();
 
-    const droppedFile = e.dataTransfer.files[0];
-    if (droppedFile) {
-      const filename = droppedFile.name;
-      setUploadStatus({ ...uploadStatus, [filename]: "uploading" });
-      setUploading(true);
-
-      try {
-        // Convert file to base64
-        const fileBuffer = await droppedFile.arrayBuffer();
-        const base64 = btoa(
-          new Uint8Array(fileBuffer).reduce(
-            (data, byte) => data + String.fromCharCode(byte),
-            ""
-          )
-        );
-
-        const endpoint = "/api/upload-file";
-
-        const response = await fetch(endpoint, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            file: base64,
-            filename: filename,
-            fileType: droppedFile.type,
-          }),
-        });
-
-        if (response.ok) {
-          await response.json(); // Response consumed but data not needed
-          setUploadStatus({ ...uploadStatus, [filename]: "success" });
-          await loadFiles();
-          setTimeout(() => {
-            setUploadStatus((prev) => {
-              const newStatus = { ...prev };
-              delete newStatus[filename];
-              return newStatus;
-            });
-          }, 3000);
-        } else {
-          let errorMessage = "فشل رفع الملف";
-          try {
-            // Read response body once
-            const contentType = response.headers.get("content-type");
-            let errorData: any;
-            
-            if (contentType?.includes("application/json")) {
-              errorData = await response.json();
-              errorMessage = errorData.error || errorData.message || errorMessage;
-              if (errorData.details) {
-                console.error("Error details:", errorData.details);
-              }
-            } else {
-              const errorText = await response.text();
-              errorMessage = errorText || errorMessage;
-            }
-          } catch (parseError) {
-            errorMessage = `خطأ ${response.status}: ${response.statusText}`;
-            console.error("Error parsing response:", parseError);
-          }
-          setUploadStatus({ ...uploadStatus, [filename]: "error" });
-          setError(errorMessage);
-        }
-      } catch (err) {
-        setUploadStatus({ ...uploadStatus, [filename]: "error" });
-        setError("حدث خطأ أثناء رفع الملف");
-        console.error(err);
-      } finally {
-        setUploading(false);
-      }
-    }
+    const droppedFiles = Array.from(e.dataTransfer.files || []);
+    await uploadFiles(droppedFiles);
   };
 
   if (loading) {
@@ -462,6 +386,7 @@ export default function AdminPage() {
               ref={fileInputRef}
               type="file"
               accept=".pdf,.docx,.txt,.md"
+              multiple
               onChange={handleFileSelect}
               className="hidden"
               disabled={uploading}
@@ -500,10 +425,10 @@ export default function AdminPage() {
           {files.length > 0 && (
             <div className="mt-6">
               <h3 className="text-xl font-bold text-black mb-4">الملفات المرفوعة</h3>
-              <div className="space-y-2">
+              <div className="max-h-[28rem] overflow-y-auto space-y-2 pr-1">
                 {files.map((file) => (
                   <div
-                    key={file.filename}
+                    key={file.documentId || file.filename}
                     className="flex items-center justify-between p-4 bg-gray-50 rounded-lg border border-gray-200"
                   >
                     <div className="flex items-center gap-3">
@@ -513,11 +438,12 @@ export default function AdminPage() {
                         <p className="text-sm text-gray-500">
                           {file.fileType} • {file.chunkCount} أجزاء •{" "}
                           {new Date(file.uploadedAt).toLocaleDateString("ar-SA")}
+                          {file.status ? ` • ${file.status}` : ""}
                         </p>
                       </div>
                     </div>
                     <Button
-                      onClick={() => handleDeleteFile(file.filename)}
+                      onClick={() => handleDeleteFile(file)}
                       variant="outline"
                       className="border-2 border-red-500 text-red-500 hover:bg-red-50"
                       size="sm"
@@ -543,7 +469,7 @@ export default function AdminPage() {
               <thead className="bg-black text-white">
                 <tr>
                   <th className="px-6 py-4 text-right font-semibold" dir="rtl">البريد الإلكتروني</th>
-                  <th className="px-6 py-4 text-right font-semibold" dir="rtl">حالة الموافقة</th>
+                  <th className="px-6 py-4 text-right font-semibold" dir="rtl">الحالة</th>
                   <th className="px-6 py-4 text-right font-semibold" dir="rtl">نوع الحساب</th>
                   <th className="px-6 py-4 text-right font-semibold" dir="rtl">تاريخ الإنشاء</th>
                   <th className="px-6 py-4 text-right font-semibold" dir="rtl">الإجراءات</th>
@@ -562,13 +488,9 @@ export default function AdminPage() {
                       <td className="px-6 py-4 text-gray-900" dir="ltr">{user.email}</td>
                       <td className="px-6 py-4">
                         <span
-                          className={`inline-block px-3 py-1 rounded-full text-sm font-medium ${
-                            user.is_approved
-                              ? "bg-green-100 text-green-800"
-                              : "bg-red-100 text-red-800"
-                          }`}
+                          className={`inline-block px-3 py-1 rounded-full text-sm font-medium ${getStatusClasses(user.status)}`}
                         >
-                          {user.is_approved ? "موافق عليه" : "قيد المراجعة"}
+                          {getStatusLabel(user.status)}
                         </span>
                       </td>
                       <td className="px-6 py-4">
@@ -587,14 +509,15 @@ export default function AdminPage() {
                       </td>
                       <td className="px-6 py-4">
                         <div className="flex gap-2 justify-end">
-                          {!user.is_approved ? (
+                          {user.status !== "accepted" && (
                             <Button
                               onClick={() => handleApprove(user.id)}
                               className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 text-sm"
                             >
                               الموافقة
                             </Button>
-                          ) : (
+                          )}
+                          {user.status !== "rejected" && (
                             <Button
                               onClick={() => handleReject(user.id)}
                               variant="outline"
@@ -603,6 +526,13 @@ export default function AdminPage() {
                               رفض
                             </Button>
                           )}
+                          <Button
+                            onClick={() => handleToggleAdmin(user.id, !user.is_admin)}
+                            variant="outline"
+                            className="border-2 border-blue-500 text-blue-600 hover:bg-blue-50 px-4 py-2 text-sm"
+                          >
+                            {user.is_admin ? "سحب الأدمن" : "تعيين أدمن"}
+                          </Button>
                         </div>
                       </td>
                     </tr>
@@ -633,9 +563,9 @@ export default function AdminPage() {
             dir="rtl"
           >
             <div className="text-3xl font-bold text-green-600 mb-2">
-              {users.filter((u) => u.is_approved).length}
+              {users.filter((u) => u.status === "accepted" || u.is_admin).length}
             </div>
-            <div className="text-gray-600">مستخدمين موافق عليهم</div>
+            <div className="text-gray-600">مستخدمين مقبولين</div>
           </motion.div>
           <motion.div
             initial={{ opacity: 0, y: 20 }}
@@ -644,10 +574,10 @@ export default function AdminPage() {
             className="bg-white border-2 border-black rounded-2xl p-6"
             dir="rtl"
           >
-            <div className="text-3xl font-bold text-red-600 mb-2">
-              {users.filter((u) => !u.is_approved).length}
+            <div className="text-3xl font-bold text-yellow-600 mb-2">
+              {users.filter((u) => !u.is_admin && (u.status ?? "pending") === "pending").length}
             </div>
-            <div className="text-gray-600">قيد المراجعة</div>
+            <div className="text-gray-600">بانتظار المراجعة</div>
           </motion.div>
         </div>
       </div>

@@ -44,6 +44,8 @@ export default function LoginPage() {
         const errMsg = data.error && typeof data.error === "string" ? data.error : "";
         if (data.error === "PENDING_APPROVAL") {
           setError("حسابك قيد المراجعة. يرجى انتظار موافقة الإدارة");
+        } else if (data.error === "REJECTED_ACCOUNT") {
+          setError("تم رفض حسابك من قبل الإدارة. يرجى التواصل مع المسؤول إذا كنت ترى أن ذلك بالخطأ.");
         } else if (data.error === "INVALID_CREDENTIALS") {
           setError("البريد الإلكتروني أو كلمة المرور غير صحيحة");
         } else if (data.error === "Supabase is not configured on server" && details) {
@@ -67,6 +69,7 @@ export default function LoginPage() {
           id: data.user.id,
           email: data.user.email,
           is_admin: data.user.is_admin,
+          status: data.user.status,
         }));
 
         // Redirect based on role

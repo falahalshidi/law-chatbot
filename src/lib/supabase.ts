@@ -18,5 +18,6 @@ export interface User {
   email: string;
   is_admin: boolean;
   is_approved: boolean;
+  status?: "pending" | "accepted" | "rejected";
   created_at: string;
 }

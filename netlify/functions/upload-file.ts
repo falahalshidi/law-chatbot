@@ -2,7 +2,10 @@ import type { HandlerEvent, HandlerContext } from "@netlify/functions";
 import { CloudClient } from "chromadb";
 import pdfParse from "pdf-parse";
 import mammoth from "mammoth";
+import { randomUUID } from "node:crypto";
 import { localHashEmbeddingFunction } from "./_lib/hash-embedding";
+import { detectCategory } from "./_lib/document-classifier";
+import { DOCUMENTS_BUCKET, ensureDocumentsBucket, getAdminSupabase } from "./_lib/supabase-admin";
 
 // ChromaDB Cloud automatically generates embeddings - no need for @xenova/transformers
 // This reduces function size from >250MB to <50MB
@@ -24,6 +27,7 @@ const CHROMADB_DATABASE =
   process.env.VITE_CHROMA_DATABASE;
 
 const COLLECTION_NAME = "law_documents";
+const DOCUMENTS_TABLE = "documents";
 
 // Validate ChromaDB configuration
 if (!CHROMADB_API_KEY || !CHROMADB_TENANT || !CHROMADB_DATABASE) {
@@ -36,6 +40,67 @@ if (!CHROMADB_API_KEY || !CHROMADB_TENANT || !CHROMADB_DATABASE) {
 }
 
 let chromaClient: CloudClient | null = null;
+
+function sanitizeFilename(filename: string): string {
+  return filename.replace(/[^a-zA-Z0-9._-]/g, "_");
+}
+
+async function listFilesFromDatabase() {
+  try {
+    const supabase = getAdminSupabase();
+    const { data, error } = await supabase
+      .from(DOCUMENTS_TABLE)
+      .select("id, filename, mime_type, uploaded_at, chunk_count, status")
+      .order("uploaded_at", { ascending: false });
+
+    if (error) {
+      console.error("Failed to load documents metadata from database:", error.message);
+      return null;
+    }
+
+    return (data || []).map((row: any) => ({
+      documentId: row.id,
+      filename: row.filename,
+      fileType: row.mime_type || "unknown",
+      uploadedAt: row.uploaded_at || new Date().toISOString(),
+      chunkCount: row.chunk_count || 0,
+      status: row.status || "active",
+    }));
+  } catch (error) {
+    console.error("Database file listing failed:", error);
+    return null;
+  }
+}
+
+async function listFilesFromChroma() {
+  const collection = await getCollection();
+  const allData = await collection.get();
+
+  const filesMap = new Map<string, { documentId?: string; fileType: string; uploadedAt: string; chunkCount: number; status?: string }>();
+
+  if (allData.metadatas && allData.ids) {
+    allData.metadatas.forEach((metadata: any) => {
+      if (metadata && metadata.filename) {
+        if (!filesMap.has(metadata.filename)) {
+          filesMap.set(metadata.filename, {
+            documentId: metadata.documentId,
+            fileType: metadata.fileType || "unknown",
+            uploadedAt: metadata.uploadedAt || new Date().toISOString(),
+            chunkCount: 0,
+            status: metadata.status || "active",
+          });
+        }
+        const fileInfo = filesMap.get(metadata.filename)!;
+        fileInfo.chunkCount++;
+      }
+    });
+  }
+
+  return Array.from(filesMap.entries()).map(([filename, info]) => ({
+    filename,
+    ...info,
+  }));
+}
 
 // ChromaDB Cloud automatically generates embeddings - no local model needed
 
@@ -157,31 +222,27 @@ const handler = async (event: HandlerEvent, _context: HandlerContext) => {
   // Handle GET request - list all files
   if (event.httpMethod === "GET") {
     try {
-      const collection = await getCollection();
-      const allData = await collection.get();
+      const databaseFiles = await listFilesFromDatabase();
+      const chromaFiles = await listFilesFromChroma();
+      const filesByKey = new Map<string, any>();
 
-      const filesMap = new Map<string, { fileType: string; uploadedAt: string; chunkCount: number }>();
+      for (const file of chromaFiles) {
+        filesByKey.set(file.documentId || file.filename, file);
+      }
 
-      if (allData.metadatas && allData.ids) {
-        allData.metadatas.forEach((metadata: any) => {
-          if (metadata && metadata.filename) {
-            if (!filesMap.has(metadata.filename)) {
-              filesMap.set(metadata.filename, {
-                fileType: metadata.fileType || "unknown",
-                uploadedAt: metadata.uploadedAt || new Date().toISOString(),
-                chunkCount: 0,
-              });
-            }
-            const fileInfo = filesMap.get(metadata.filename)!;
-            fileInfo.chunkCount++;
-          }
+      for (const file of databaseFiles || []) {
+        const key = file.documentId || file.filename;
+        const existing = filesByKey.get(key);
+        filesByKey.set(key, {
+          ...existing,
+          ...file,
+          chunkCount: file.chunkCount || existing?.chunkCount || 0,
         });
       }
 
-      const files = Array.from(filesMap.entries()).map(([filename, info]) => ({
-        filename,
-        ...info,
-      }));
+      const files = Array.from(filesByKey.values()).sort((a, b) =>
+        new Date(b.uploadedAt || 0).getTime() - new Date(a.uploadedAt || 0).getTime()
+      );
 
       return {
         statusCode: 200,
@@ -209,16 +270,65 @@ const handler = async (event: HandlerEvent, _context: HandlerContext) => {
   // Handle DELETE request - delete file
   if (event.httpMethod === "DELETE") {
     try {
-      const { filename } = JSON.parse(event.body || "{}");
-      if (!filename) {
+      const { filename, documentId } = JSON.parse(event.body || "{}");
+      if (!filename && !documentId) {
         return {
           statusCode: 400,
           headers: {
             "Access-Control-Allow-Origin": "*",
             "Content-Type": "application/json",
           },
-          body: JSON.stringify({ error: "Filename is required" }),
+          body: JSON.stringify({ error: "Filename or documentId is required" }),
         };
+      }
+
+      let deletedStorage = false;
+      let deletedMetadata = false;
+
+      try {
+        const supabase = getAdminSupabase();
+        let fileRecord: any = null;
+
+        if (documentId) {
+          const { data } = await supabase
+            .from(DOCUMENTS_TABLE)
+            .select("id, storage_path, filename")
+            .eq("id", documentId)
+            .maybeSingle();
+          fileRecord = data;
+        } else if (filename) {
+          const { data } = await supabase
+            .from(DOCUMENTS_TABLE)
+            .select("id, storage_path, filename")
+            .eq("filename", filename)
+            .order("uploaded_at", { ascending: false })
+            .limit(1)
+            .maybeSingle();
+          fileRecord = data;
+        }
+
+        if (fileRecord?.storage_path) {
+          const { error: storageDeleteError } = await supabase.storage
+            .from(DOCUMENTS_BUCKET)
+            .remove([fileRecord.storage_path]);
+
+          if (!storageDeleteError) {
+            deletedStorage = true;
+          }
+        }
+
+        if (fileRecord?.id) {
+          const { error: metadataDeleteError } = await supabase
+            .from(DOCUMENTS_TABLE)
+            .delete()
+            .eq("id", fileRecord.id);
+
+          if (!metadataDeleteError) {
+            deletedMetadata = true;
+          }
+        }
+      } catch (databaseError) {
+        console.error("Failed to delete file from database/storage:", databaseError);
       }
 
       const collection = await getCollection();
@@ -228,7 +338,10 @@ const handler = async (event: HandlerEvent, _context: HandlerContext) => {
       if (allData.ids && allData.metadatas) {
         allData.ids.forEach((id, index) => {
           const metadata = allData.metadatas?.[index];
-          if (metadata && metadata.filename === filename) {
+          if (
+            metadata &&
+            ((documentId && metadata.documentId === documentId) || (!documentId && filename && metadata.filename === filename))
+          ) {
             idsToDelete.push(id as string);
           }
         });
@@ -248,7 +361,9 @@ const handler = async (event: HandlerEvent, _context: HandlerContext) => {
         },
         body: JSON.stringify({ 
           success: true, 
-          deletedCount: idsToDelete.length 
+          deletedCount: idsToDelete.length,
+          deletedStorage,
+          deletedMetadata,
         }),
       };
     } catch (error) {
@@ -281,7 +396,7 @@ const handler = async (event: HandlerEvent, _context: HandlerContext) => {
   try {
     // Parse JSON body with base64 encoded file
     const body = JSON.parse(event.body || "{}");
-    const { file: fileData, filename: fname, fileType: ftype } = body;
+    const { file: fileData, filename: fname, fileType: ftype, size, uploadedBy } = body;
 
     if (!fileData || !fname) {
       return {
@@ -298,6 +413,9 @@ const handler = async (event: HandlerEvent, _context: HandlerContext) => {
     const fileBuffer = Buffer.from(fileData, "base64");
     const filename = fname;
     const fileType = ftype || "";
+    const documentId = randomUUID();
+    const safeFilename = sanitizeFilename(filename);
+    const uploadedAt = new Date().toISOString();
 
     // Extract text based on file type
     let text = "";
@@ -333,16 +451,64 @@ const handler = async (event: HandlerEvent, _context: HandlerContext) => {
 
     // Split text into chunks
     const chunks = splitTextIntoChunks(text, 1000, 200);
+    const category = detectCategory(`${filename}\n${text.slice(0, 2000)}`);
 
     console.log(`Processing ${chunks.length} chunks for file: ${filename}`);
 
+    await ensureDocumentsBucket();
+    const supabase = getAdminSupabase();
+    const storagePath = `${documentId}/${safeFilename}`;
+
+    const { error: storageError } = await supabase.storage
+      .from(DOCUMENTS_BUCKET)
+      .upload(storagePath, fileBuffer, {
+        contentType: fileType || "application/octet-stream",
+        upsert: true,
+      });
+
+    if (storageError) {
+      throw new Error(`Failed to save original file in storage: ${storageError.message}`);
+    }
+
+    let metadataSaved = false;
+    try {
+      const { error: dbError } = await supabase
+        .from(DOCUMENTS_TABLE)
+        .insert([
+          {
+            id: documentId,
+            filename,
+            mime_type: fileType || fileExtension || "unknown",
+            size: Number(size) || fileBuffer.length,
+            storage_path: storagePath,
+            uploaded_by: uploadedBy || null,
+            uploaded_at: uploadedAt,
+            status: "active",
+            chunk_count: chunks.length,
+            category,
+          },
+        ]);
+
+      if (dbError) {
+        console.error("Failed to save document metadata:", dbError.message);
+      } else {
+        metadataSaved = true;
+      }
+    } catch (dbError) {
+      console.error("Document metadata insert failed:", dbError);
+    }
+
     // Prepare metadata
-    const uploadedAt = new Date().toISOString();
     const metadata = chunks.map((_, index) => ({
+      documentId,
       filename,
       fileType: fileExtension,
       uploadedAt,
       chunkIndex: index,
+      category,
+      sourceType: "uploaded_file",
+      uploadedBy: uploadedBy || null,
+      storagePath,
     }));
 
     // Store in ChromaDB
@@ -390,8 +556,12 @@ const handler = async (event: HandlerEvent, _context: HandlerContext) => {
       },
       body: JSON.stringify({
         success: true,
+        documentId,
         filename,
         chunksCount: chunks.length,
+        storagePath,
+        category,
+        metadataSaved,
         message: "File uploaded and processed successfully",
       }),
     };
