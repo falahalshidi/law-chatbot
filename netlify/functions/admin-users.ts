@@ -1,6 +1,7 @@
 import type { HandlerEvent, HandlerContext } from "@netlify/functions";
 import { createClient } from "@supabase/supabase-js";
 import { normalizeUserStatus, statusToLegacyApproval, type UserStatus } from "./_lib/user-status";
+import { sendApprovalEmail } from "./_lib/email";
 
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -61,6 +62,19 @@ const handler = async (event: HandlerEvent, _context: HandlerContext) => {
         return jsonResponse(400, { error: "userId is required" });
       }
 
+      const { data: existingUser, error: existingUserError } = await supabase
+        .from("users")
+        .select("*")
+        .eq("id", userId)
+        .single();
+
+      if (existingUserError || !existingUser) {
+        return jsonResponse(404, {
+          error: existingUserError?.message || "User not found",
+        });
+      }
+
+      const previousStatus = normalizeUserStatus(existingUser);
       const updates: Record<string, unknown> = {};
 
       if (nextStatus) {
@@ -101,7 +115,19 @@ const handler = async (event: HandlerEvent, _context: HandlerContext) => {
         return jsonResponse(500, { error: error.message });
       }
 
-      return jsonResponse(200, { success: true });
+      const finalStatus = isAdmin ? "accepted" : nextStatus || previousStatus;
+      let emailNotification:
+        | { sent: boolean; skipped?: boolean; reason?: string; messageId?: string }
+        | undefined;
+
+      if (previousStatus !== "accepted" && finalStatus === "accepted" && !existingUser.is_admin) {
+        emailNotification = await sendApprovalEmail(existingUser.email || "");
+      }
+
+      return jsonResponse(200, {
+        success: true,
+        emailNotification,
+      });
     }
 
     return jsonResponse(405, { error: "Method not allowed" });

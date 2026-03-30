@@ -95,6 +95,7 @@ export default function AdminPage() {
 
   const updateUser = async (userId: string, updates: { status?: User["status"]; isAdmin?: boolean }) => {
     try {
+      setError("");
       const response = await fetch("/api/admin-users", {
         method: "PATCH",
         headers: {
@@ -108,6 +109,25 @@ export default function AdminPage() {
         setError("حدث خطأ أثناء تحديث حالة المستخدم");
         console.error("Failed to update user:", data);
       } else {
+        const data = await response.json().catch(() => ({}));
+        const emailNotification = data.emailNotification;
+        const emailReason = typeof emailNotification?.reason === "string" ? emailNotification.reason : "";
+
+        if (
+          emailNotification &&
+          emailNotification.sent === false &&
+          updates.status === "accepted"
+        ) {
+          if (emailReason.startsWith("missing_smtp_config:")) {
+            const missingFields = emailReason.split(":")[1] || "";
+            setError(`تمت الموافقة على المستخدم، لكن إعدادات البريد ناقصة: ${missingFields}. أضفها في متغيرات البيئة ثم أعد المحاولة.`);
+          } else if (emailReason) {
+            setError(`تمت الموافقة على المستخدم، لكن تعذر إرسال البريد الإلكتروني: ${emailReason}`);
+          } else {
+            setError("تمت الموافقة على المستخدم، لكن تعذر إرسال رسالة البريد الإلكتروني. يرجى التحقق من إعدادات SMTP.");
+          }
+        }
+
         loadUsers(); // Reload users
       }
     } catch (err) {

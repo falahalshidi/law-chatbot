@@ -95,7 +95,7 @@ export default function SignupPage() {
               تم إنشاء الحساب بنجاح!
             </h2>
             <p className="text-gray-600" dir="rtl">
-              سيتم توجيهك إلى صفحة تسجيل الدخول...
+              تم إرسال طلبك للإدارة للمراجعة، وسيصلك إشعار عبر البريد الإلكتروني عند الموافقة على الحساب. سيتم توجيهك إلى صفحة تسجيل الدخول...
             </p>
           </div>
         </motion.div>
@@ -167,7 +167,7 @@ export default function SignupPage() {
 
             <div className="bg-gray-50 border-2 border-gray-200 rounded-xl p-4 text-sm text-gray-600" dir="rtl">
               <p className="mb-2">ملاحظة:</p>
-              <p>بعد إنشاء الحساب، سيحتاج إلى موافقة الإدارة قبل إمكانية تسجيل الدخول.</p>
+              <p>بعد إنشاء الحساب، سيبقى الحساب قيد المراجعة حتى موافقة الإدارة، وسيصلك إشعار بالبريد الإلكتروني عند قبول الحساب.</p>
             </div>
 
             <Button

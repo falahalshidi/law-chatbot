@@ -43,7 +43,7 @@ export default function LoginPage() {
         const details = data.details && String(data.details);
         const errMsg = data.error && typeof data.error === "string" ? data.error : "";
         if (data.error === "PENDING_APPROVAL") {
-          setError("حسابك قيد المراجعة. يرجى انتظار موافقة الإدارة");
+          setError("حسابك ما زال قيد المراجعة. بعد موافقة الإدارة سيصلك إشعار عبر البريد الإلكتروني ويمكنك بعدها تسجيل الدخول.");
         } else if (data.error === "REJECTED_ACCOUNT") {
           setError("تم رفض حسابك من قبل الإدارة. يرجى التواصل مع المسؤول إذا كنت ترى أن ذلك بالخطأ.");
         } else if (data.error === "INVALID_CREDENTIALS") {
