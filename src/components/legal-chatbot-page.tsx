@@ -7,7 +7,11 @@ import { ChatMessage } from "./chat-message";
 import { sendMessage } from "@/lib/api";
 import type { Message } from "@/types/chat";
 
-export default function LegalChatbotPage() {
+interface LegalChatbotPageProps {
+  initialInput?: string;
+}
+
+export default function LegalChatbotPage({ initialInput = "" }: LegalChatbotPageProps) {
   const [message, setMessage] = useState("");
   const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -20,6 +24,12 @@ export default function LegalChatbotPage() {
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
+
+  useEffect(() => {
+    if (initialInput && messages.length === 0) {
+      setMessage(initialInput);
+    }
+  }, [initialInput, messages.length]);
 
   const iconAnimation = {
     animate: {
@@ -243,4 +253,3 @@ export default function LegalChatbotPage() {
     </div>
   );
 }
-

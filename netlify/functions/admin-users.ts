@@ -57,6 +57,7 @@ const handler = async (event: HandlerEvent, _context: HandlerContext) => {
       const userId = String(body.userId || "");
       const nextStatus = typeof body.status === "string" ? (body.status as UserStatus) : undefined;
       const isAdmin = typeof body.isAdmin === "boolean" ? body.isAdmin : undefined;
+      const resendApprovalEmail = body.resendApprovalEmail === true;
 
       if (!userId) {
         return jsonResponse(400, { error: "userId is required" });
@@ -90,14 +91,32 @@ const handler = async (event: HandlerEvent, _context: HandlerContext) => {
         }
       }
 
-      if (Object.keys(updates).length === 0) {
+      if (Object.keys(updates).length === 0 && !resendApprovalEmail) {
         return jsonResponse(400, { error: "No updates provided" });
       }
 
-      let { error } = await supabase
-        .from("users")
-        .update(updates)
-        .eq("id", userId);
+      if (resendApprovalEmail && previousStatus !== "accepted") {
+        return jsonResponse(400, {
+          error: "Approval email can only be resent for accepted users",
+        });
+      }
+
+      if (resendApprovalEmail && existingUser.is_admin) {
+        return jsonResponse(400, {
+          error: "Approval email resend is not available for admin users",
+        });
+      }
+
+      let error = null;
+
+      if (Object.keys(updates).length > 0) {
+        const updateResult = await supabase
+          .from("users")
+          .update(updates)
+          .eq("id", userId);
+
+        error = updateResult.error;
+      }
 
       if (error && error.message.toLowerCase().includes("status")) {
         const fallbackUpdates = { ...updates };
@@ -120,7 +139,9 @@ const handler = async (event: HandlerEvent, _context: HandlerContext) => {
         | { sent: boolean; skipped?: boolean; reason?: string; messageId?: string }
         | undefined;
 
-      if (previousStatus !== "accepted" && finalStatus === "accepted" && !existingUser.is_admin) {
+      if (resendApprovalEmail) {
+        emailNotification = await sendApprovalEmail(existingUser.email || "");
+      } else if (previousStatus !== "accepted" && finalStatus === "accepted" && !existingUser.is_admin) {
         emailNotification = await sendApprovalEmail(existingUser.email || "");
       }
 

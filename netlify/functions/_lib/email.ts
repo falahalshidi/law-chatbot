@@ -1,11 +1,11 @@
 import nodemailer from "nodemailer";
 
-const SMTP_HOST = process.env.SMTP_HOST || "smtp.hostinger.com";
+const SMTP_HOST = process.env.SMTP_HOST || "";
 const SMTP_PORT = Number(process.env.SMTP_PORT || 465);
 const SMTP_SECURE = String(process.env.SMTP_SECURE || (SMTP_PORT === 465 ? "true" : "false")).toLowerCase() !== "false";
-const SMTP_USER = process.env.SMTP_USER || "falah@nuqtai.com";
+const SMTP_USER = process.env.SMTP_USER || "";
 const SMTP_PASS = process.env.SMTP_PASS || process.env.MAIL_PASSWORD || process.env.EMAIL_PASSWORD || "";
-const MAIL_FROM = process.env.MAIL_FROM || `Nuqt AI <${SMTP_USER}>`;
+const MAIL_FROM = process.env.MAIL_FROM || (SMTP_USER ? `Nuqt AI <${SMTP_USER}>` : "");
 const APP_BASE_URL =
   process.env.APP_BASE_URL ||
   process.env.URL ||
@@ -53,6 +53,30 @@ function getTransporter() {
   }
 
   return transporter;
+}
+
+function normalizeEmailError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error || "unknown_email_error");
+  const lowerMessage = message.toLowerCase();
+
+  if (
+    lowerMessage.includes("535") ||
+    lowerMessage.includes("invalid login") ||
+    lowerMessage.includes("authentication failed")
+  ) {
+    return "smtp_auth_failed";
+  }
+
+  if (
+    lowerMessage.includes("connection timeout") ||
+    lowerMessage.includes("greeting never received") ||
+    lowerMessage.includes("enotfound") ||
+    lowerMessage.includes("econnrefused")
+  ) {
+    return "smtp_connection_failed";
+  }
+
+  return message;
 }
 
 function getLoginUrl() {
@@ -158,7 +182,7 @@ export async function sendApprovalEmail(toEmail: string): Promise<EmailResult> {
     console.error("Failed to send approval email:", error);
     return {
       sent: false,
-      reason: error instanceof Error ? error.message : "unknown_email_error",
+      reason: normalizeEmailError(error),
     };
   }
 }

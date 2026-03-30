@@ -1,10 +1,11 @@
 import { useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import LegalChatbotPage from "./legal-chatbot-page";
 import { Button } from "@/components/ui/button";
 
 export default function ChatPage() {
   const navigate = useNavigate();
+  const location = useLocation();
 
   useEffect(() => {
     // Check if user is logged in
@@ -26,12 +27,26 @@ export default function ChatPage() {
 
   const userStr = localStorage.getItem("user");
   const user = userStr ? JSON.parse(userStr) : null;
+  const initialPrefill =
+    typeof location.state === "object" &&
+    location.state !== null &&
+    "prefill" in location.state &&
+    typeof location.state.prefill === "string"
+      ? location.state.prefill
+      : "";
 
   return (
     <div className="relative">
       {/* Header with logout button */}
       {user && (
         <div className="absolute top-4 right-4 z-50 flex gap-2" dir="rtl">
+          <Button
+            onClick={() => navigate("/chat")}
+            variant="outline"
+            className="border-2 border-black text-black hover:bg-gray-100"
+          >
+            الرئيسية
+          </Button>
           {user.is_admin && (
             <Button
               onClick={() => navigate("/admin")}
@@ -50,8 +65,7 @@ export default function ChatPage() {
           </Button>
         </div>
       )}
-      <LegalChatbotPage />
+      <LegalChatbotPage initialInput={initialPrefill} />
     </div>
   );
 }
-

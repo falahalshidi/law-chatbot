@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { useNavigate } from "react-router-dom";
-import { Upload, FileText, X, Trash2 } from "lucide-react";
+import { Upload, FileText, X, Trash2, Mail } from "lucide-react";
 
 interface UploadedFile {
   documentId?: string;
@@ -22,14 +22,18 @@ interface User {
   created_at: string;
 }
 
+type UserAction = "approve" | "reject" | "toggle-admin" | "resend-email";
+
 export default function AdminPage() {
   const navigate = useNavigate();
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   const [files, setFiles] = useState<UploadedFile[]>([]);
   const [uploading, setUploading] = useState(false);
   const [uploadStatus, setUploadStatus] = useState<{ [key: string]: "uploading" | "success" | "error" }>({});
+  const [userActionLoading, setUserActionLoading] = useState<Record<string, UserAction | undefined>>({});
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const getCurrentUser = () => {
@@ -93,9 +97,15 @@ export default function AdminPage() {
     }
   };
 
-  const updateUser = async (userId: string, updates: { status?: User["status"]; isAdmin?: boolean }) => {
+  const updateUser = async (
+    userId: string,
+    updates: { status?: User["status"]; isAdmin?: boolean; resendApprovalEmail?: boolean },
+    action: UserAction
+  ) => {
     try {
       setError("");
+      setNotice("");
+      setUserActionLoading((prev) => ({ ...prev, [userId]: action }));
       const response = await fetch("/api/admin-users", {
         method: "PATCH",
         headers: {
@@ -106,7 +116,10 @@ export default function AdminPage() {
 
       if (!response.ok) {
         const data = await response.json().catch(() => ({}));
-        setError("حدث خطأ أثناء تحديث حالة المستخدم");
+        const fallbackMessage = updates.resendApprovalEmail
+          ? "حدث خطأ أثناء إعادة إرسال بريد القبول"
+          : "حدث خطأ أثناء تحديث حالة المستخدم";
+        setError(typeof data.error === "string" && data.error ? data.error : fallbackMessage);
         console.error("Failed to update user:", data);
       } else {
         const data = await response.json().catch(() => ({}));
@@ -121,31 +134,62 @@ export default function AdminPage() {
           if (emailReason.startsWith("missing_smtp_config:")) {
             const missingFields = emailReason.split(":")[1] || "";
             setError(`تمت الموافقة على المستخدم، لكن إعدادات البريد ناقصة: ${missingFields}. أضفها في متغيرات البيئة ثم أعد المحاولة.`);
+          } else if (emailReason === "smtp_auth_failed") {
+            setError("تمت الموافقة على المستخدم، لكن بيانات SMTP غير صحيحة. راجع SMTP_USER و SMTP_PASS وتأكد أنهما يخصان صندوق البريد نفسه.");
+          } else if (emailReason === "smtp_connection_failed") {
+            setError("تمت الموافقة على المستخدم، لكن تعذر الاتصال بخادم البريد. راجع SMTP_HOST و SMTP_PORT و SMTP_SECURE.");
           } else if (emailReason) {
             setError(`تمت الموافقة على المستخدم، لكن تعذر إرسال البريد الإلكتروني: ${emailReason}`);
           } else {
             setError("تمت الموافقة على المستخدم، لكن تعذر إرسال رسالة البريد الإلكتروني. يرجى التحقق من إعدادات SMTP.");
           }
+        } else if (updates.resendApprovalEmail) {
+          if (emailNotification?.sent) {
+            setNotice("تمت إعادة إرسال بريد القبول بنجاح.");
+          } else if (emailReason.startsWith("missing_smtp_config:")) {
+            const missingFields = emailReason.split(":")[1] || "";
+            setError(`تعذر إعادة إرسال البريد لأن إعدادات SMTP ناقصة: ${missingFields}.`);
+          } else if (emailReason === "smtp_auth_failed") {
+            setError("تعذر إعادة إرسال البريد لأن بيانات SMTP غير صحيحة. راجع SMTP_USER و SMTP_PASS وتأكد أنهما يخصان صندوق البريد نفسه.");
+          } else if (emailReason === "smtp_connection_failed") {
+            setError("تعذر إعادة إرسال البريد بسبب مشكلة اتصال بخادم SMTP. راجع SMTP_HOST و SMTP_PORT و SMTP_SECURE.");
+          } else if (emailReason) {
+            setError(`تعذر إعادة إرسال بريد القبول: ${emailReason}`);
+          } else {
+            setError("تعذر إعادة إرسال بريد القبول. يرجى التحقق من إعدادات SMTP.");
+          }
+        } else if (updates.status === "accepted" && emailNotification?.sent) {
+          setNotice("تمت الموافقة على المستخدم وإرسال بريد القبول.");
         }
 
         loadUsers(); // Reload users
       }
     } catch (err) {
-      setError("حدث خطأ أثناء تحديث حالة المستخدم");
+      setError(
+        updates.resendApprovalEmail
+          ? "حدث خطأ أثناء إعادة إرسال بريد القبول"
+          : "حدث خطأ أثناء تحديث حالة المستخدم"
+      );
       console.error(err);
+    } finally {
+      setUserActionLoading((prev) => ({ ...prev, [userId]: undefined }));
     }
   };
 
   const handleApprove = async (userId: string) => {
-    await updateUser(userId, { status: "accepted" });
+    await updateUser(userId, { status: "accepted" }, "approve");
   };
 
   const handleReject = async (userId: string) => {
-    await updateUser(userId, { status: "rejected" });
+    await updateUser(userId, { status: "rejected" }, "reject");
   };
 
   const handleToggleAdmin = async (userId: string, nextIsAdmin: boolean) => {
-    await updateUser(userId, { isAdmin: nextIsAdmin });
+    await updateUser(userId, { isAdmin: nextIsAdmin }, "toggle-admin");
+  };
+
+  const handleResendApprovalEmail = async (userId: string) => {
+    await updateUser(userId, { resendApprovalEmail: true }, "resend-email");
   };
 
   const handleLogout = () => {
@@ -355,7 +399,7 @@ export default function AdminPage() {
               variant="outline"
               className="border-2 border-black"
             >
-              الذهاب للشات
+              الصفحة الرئيسية
             </Button>
             <Button
               onClick={handleLogout}
@@ -373,6 +417,18 @@ export default function AdminPage() {
             <button
               onClick={() => setError("")}
               className="mr-2 text-red-800 hover:text-red-900"
+            >
+              <X size={16} className="inline" />
+            </button>
+          </div>
+        )}
+
+        {notice && (
+          <div className="bg-green-50 border-2 border-green-200 text-green-700 px-4 py-3 rounded-xl mb-6" dir="rtl">
+            {notice}
+            <button
+              onClick={() => setNotice("")}
+              className="mr-2 text-green-800 hover:text-green-900"
             >
               <X size={16} className="inline" />
             </button>
@@ -529,29 +585,47 @@ export default function AdminPage() {
                       </td>
                       <td className="px-6 py-4">
                         <div className="flex gap-2 justify-end">
+                          {user.status === "accepted" && !user.is_admin && (
+                            <Button
+                              onClick={() => handleResendApprovalEmail(user.id)}
+                              variant="outline"
+                              disabled={Boolean(userActionLoading[user.id])}
+                              className="border-2 border-amber-500 text-amber-700 hover:bg-amber-50 px-4 py-2 text-sm"
+                            >
+                              <Mail size={16} className="mr-1" />
+                              {userActionLoading[user.id] === "resend-email" ? "جاري الإرسال..." : "إعادة إرسال البريد"}
+                            </Button>
+                          )}
                           {user.status !== "accepted" && (
                             <Button
                               onClick={() => handleApprove(user.id)}
+                              disabled={Boolean(userActionLoading[user.id])}
                               className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 text-sm"
                             >
-                              الموافقة
+                              {userActionLoading[user.id] === "approve" ? "جاري التنفيذ..." : "الموافقة"}
                             </Button>
                           )}
                           {user.status !== "rejected" && (
                             <Button
                               onClick={() => handleReject(user.id)}
                               variant="outline"
+                              disabled={Boolean(userActionLoading[user.id])}
                               className="border-2 border-red-500 text-red-500 hover:bg-red-50 px-4 py-2 text-sm"
                             >
-                              رفض
+                              {userActionLoading[user.id] === "reject" ? "جاري التنفيذ..." : "رفض"}
                             </Button>
                           )}
                           <Button
                             onClick={() => handleToggleAdmin(user.id, !user.is_admin)}
                             variant="outline"
+                            disabled={Boolean(userActionLoading[user.id])}
                             className="border-2 border-blue-500 text-blue-600 hover:bg-blue-50 px-4 py-2 text-sm"
                           >
-                            {user.is_admin ? "سحب الأدمن" : "تعيين أدمن"}
+                            {userActionLoading[user.id] === "toggle-admin"
+                              ? "جاري التنفيذ..."
+                              : user.is_admin
+                              ? "سحب الأدمن"
+                              : "تعيين أدمن"}
                           </Button>
                         </div>
                       </td>

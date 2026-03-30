@@ -4,6 +4,8 @@ import LoginPage from "./components/login-page";
 import SignupPage from "./components/signup-page";
 import ChatPage from "./components/chat-page";
 import AdminPage from "./components/admin-page";
+import UserHomePage from "./components/user-home-page";
+import LawLibraryPage from "./components/law-library-page";
 import { ProtectedRoute } from "./components/protected-route";
 
 function App() {
@@ -17,7 +19,23 @@ function App() {
           path="/chat"
           element={
             <ProtectedRoute>
+              <UserHomePage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/assistant"
+          element={
+            <ProtectedRoute>
               <ChatPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/laws"
+          element={
+            <ProtectedRoute>
+              <LawLibraryPage />
             </ProtectedRoute>
           }
         />
@@ -36,4 +54,3 @@ function App() {
 }
 
 export default App;
-
