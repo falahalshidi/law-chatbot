@@ -1,12 +1,13 @@
 import { motion } from "framer-motion";
 import { useNavigate } from "react-router-dom";
-import { BookOpenText, Bot, Shield, LogOut } from "lucide-react";
+import { BookOpenText, Bot, Shield, LogIn, LogOut } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 export default function UserHomePage() {
   const navigate = useNavigate();
   const userStr = localStorage.getItem("user");
   const user = userStr ? JSON.parse(userStr) : null;
+  const isLoggedIn = Boolean(user);
 
   const handleLogout = () => {
     localStorage.removeItem("user");
@@ -39,14 +40,25 @@ export default function UserHomePage() {
                 لوحة الإدارة
               </Button>
             )}
-            <Button
-              onClick={handleLogout}
-              variant="outline"
-              className="border-2 border-gray-400 text-gray-600 hover:bg-gray-100"
-            >
-              <LogOut size={16} className="ml-1" />
-              تسجيل الخروج
-            </Button>
+            {isLoggedIn ? (
+              <Button
+                onClick={handleLogout}
+                variant="outline"
+                className="border-2 border-gray-400 text-gray-600 hover:bg-gray-100"
+              >
+                <LogOut size={16} className="ml-1" />
+                تسجيل الخروج
+              </Button>
+            ) : (
+              <Button
+                onClick={() => navigate("/login")}
+                variant="outline"
+                className="border-2 border-gray-400 text-gray-600 hover:bg-gray-100"
+              >
+                <LogIn size={16} className="ml-1" />
+                تسجيل الدخول
+              </Button>
+            )}
           </div>
         </motion.div>
 
@@ -116,7 +128,7 @@ export default function UserHomePage() {
               </div>
             </div>
             <Button
-              onClick={() => navigate("/assistant")}
+              onClick={() => navigate(isLoggedIn ? "/assistant" : "/login")}
               className="h-12 w-full bg-black text-white hover:bg-gray-800"
             >
               ابدأ المحادثة

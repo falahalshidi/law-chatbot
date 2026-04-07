@@ -1,5 +1,4 @@
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
-import LandingPage from "./components/landing-page";
 import LoginPage from "./components/login-page";
 import SignupPage from "./components/signup-page";
 import ChatPage from "./components/chat-page";
@@ -12,7 +11,7 @@ function App() {
   return (
     <BrowserRouter>
       <Routes>
-        <Route path="/" element={<LandingPage />} />
+        <Route path="/" element={<UserHomePage />} />
         <Route path="/login" element={<LoginPage />} />
         <Route path="/signup" element={<SignupPage />} />
         <Route
@@ -33,11 +32,7 @@ function App() {
         />
         <Route
           path="/laws"
-          element={
-            <ProtectedRoute>
-              <LawLibraryPage />
-            </ProtectedRoute>
-          }
+          element={<LawLibraryPage />}
         />
         <Route
           path="/admin"

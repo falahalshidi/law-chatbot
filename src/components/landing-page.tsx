@@ -71,10 +71,18 @@ export default function LandingPage() {
               >
                 إنشاء حساب جديد
               </Button>
+
+              <Button
+                onClick={() => navigate("/laws")}
+                variant="outline"
+                className="w-full border-2 border-amber-500 text-amber-700 hover:bg-amber-50 h-14 text-lg font-semibold rounded-xl transition-all duration-200"
+              >
+                دخول المكتبة العامة
+              </Button>
             </div>
 
             <p className="text-center text-gray-600 text-sm">
-              بالاستمرار، أنت توافق على شروط الاستخدام وسياسة الخصوصية
+              يمكنك تصفح القوانين من المكتبة العامة بدون تسجيل دخول، بينما الشات يتطلب تسجيل دخول
             </p>
           </motion.div>
         </div>
@@ -82,4 +90,3 @@ export default function LandingPage() {
     </div>
   );
 }
-

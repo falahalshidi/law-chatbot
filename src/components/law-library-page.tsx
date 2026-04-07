@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { useNavigate } from "react-router-dom";
-import { ArrowRight, BookOpenText, Bot, LogOut, Search, Shield } from "lucide-react";
+import { ArrowRight, BookOpenText, Bot, LogIn, LogOut, Search, Shield } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
@@ -35,6 +35,7 @@ export default function LawLibraryPage() {
   const navigate = useNavigate();
   const userStr = localStorage.getItem("user");
   const user = userStr ? JSON.parse(userStr) : null;
+  const isLoggedIn = Boolean(user);
 
   const [documents, setDocuments] = useState<LawDocument[]>([]);
   const [selectedDocument, setSelectedDocument] = useState<LawDocument | null>(null);
@@ -177,20 +178,20 @@ export default function LawLibraryPage() {
             </div>
             <div className="flex flex-wrap justify-end gap-3">
               <Button
-                onClick={() => navigate("/chat")}
+                onClick={() => navigate(isLoggedIn ? "/chat" : "/")}
                 variant="outline"
                 className="border-2 border-black text-black hover:bg-gray-100"
               >
                 <ArrowRight size={16} className="ml-1" />
-                الصفحة الرئيسية
+                {isLoggedIn ? "الصفحة الرئيسية" : "الرئيسية"}
               </Button>
               <Button
-                onClick={() => navigate("/assistant")}
+                onClick={() => navigate(isLoggedIn ? "/assistant" : "/login")}
                 variant="outline"
                 className="border-2 border-blue-500 text-blue-600 hover:bg-blue-50"
               >
                 <Bot size={16} className="ml-1" />
-                اسأل المساعد
+                اسأل الشات
               </Button>
               {user?.is_admin && (
                 <Button
@@ -202,14 +203,25 @@ export default function LawLibraryPage() {
                   لوحة الإدارة
                 </Button>
               )}
-              <Button
-                onClick={handleLogout}
-                variant="outline"
-                className="border-2 border-gray-400 text-gray-600 hover:bg-gray-100"
-              >
-                <LogOut size={16} className="ml-1" />
-                تسجيل الخروج
-              </Button>
+              {isLoggedIn ? (
+                <Button
+                  onClick={handleLogout}
+                  variant="outline"
+                  className="border-2 border-gray-400 text-gray-600 hover:bg-gray-100"
+                >
+                  <LogOut size={16} className="ml-1" />
+                  تسجيل الخروج
+                </Button>
+              ) : (
+                <Button
+                  onClick={() => navigate("/login")}
+                  variant="outline"
+                  className="border-2 border-gray-400 text-gray-600 hover:bg-gray-100"
+                >
+                  <LogIn size={16} className="ml-1" />
+                  تسجيل الدخول
+                </Button>
+              )}
             </div>
           </div>
 
@@ -349,7 +361,7 @@ export default function LawLibraryPage() {
                   <div className="flex flex-wrap justify-end gap-3">
                     <Button
                       onClick={() =>
-                        navigate("/assistant", {
+                        navigate(isLoggedIn ? "/assistant" : "/login", {
                           state: {
                             prefill: `لدي سؤال بخصوص الملف "${selectedDocument.filename}": `,
                           },
